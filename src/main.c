@@ -9,9 +9,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "app_status.h"
+#include "config.h"
 #include "icm20948.h"
 #include "imu_fusion.h"
 #include "nvs_flash.h"
+#include "oled_display.h"
 #include "web_server.h"
 
 #define WIFI_SSID "MTN_4G_570F46"
@@ -51,10 +54,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             s_retry_num++;
         } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            app_status_set_wifi_connected(false);
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        char ip[16];
+        snprintf(ip, sizeof(ip), IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "got IP: %s", ip);
+        app_status_set_ip(ip);
+        app_status_set_wifi_connected(true);
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -120,9 +128,21 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    app_status_init();
+
+#if OLED_ENABLE
+    if (oled_display_init() == ESP_OK) {
+        oled_display_show_boot("IMU tracker", "Starting...");
+        oled_display_start_task();
+    } else {
+        ESP_LOGW(TAG, "OLED init failed — check SPI wiring (MOSI=23 CLK=18)");
+    }
+#endif
+
     imu_fusion_init();
 
     bool imu_ok = (icm20948_init() == ESP_OK);
+    app_status_set_imu_ok(imu_ok);
     if (imu_ok) {
         ESP_ERROR_CHECK(icm20948_start_task());
     } else {
@@ -130,9 +150,27 @@ void app_main(void)
         ESP_LOGE(TAG, "use SDA=GPIO21 SCL=GPIO22, NCS→3.3V, AD0→GND for 0x68");
     }
 
+#if OLED_ENABLE
+    oled_display_show_boot("WiFi", "Connecting...");
+#endif
+
     if (!wifi_init_sta()) {
         ESP_LOGE(TAG, "WiFi failed — IMU viewer needs network");
+        app_status_set_wifi_connected(false);
         return;
+    }
+
+    app_status_set_wifi_connected(true);
+    {
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif) {
+            esp_netif_ip_info_t ip;
+            if (esp_netif_get_ip_info(netif, &ip) == ESP_OK) {
+                char ip_str[16];
+                snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip.ip));
+                app_status_set_ip(ip_str);
+            }
+        }
     }
 
     log_open_url();

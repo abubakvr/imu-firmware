@@ -6,6 +6,8 @@ idf_component_register(
         "step_detect.c"
         "web_server.c"
         "index_html.c"
+        "app_status.c"
+        "oled_display.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash

@@ -39,23 +39,69 @@
 
 /* Step / walking detection (accel magnitude peaks + gyro gate). */
 #ifndef STEP_PEAK_THRESH_G
-#define STEP_PEAK_THRESH_G 0.20f
+#define STEP_PEAK_THRESH_G 0.17f
 #endif
 #ifndef STEP_MIN_PEAK_G
-#define STEP_MIN_PEAK_G 0.24f
+#define STEP_MIN_PEAK_G 0.20f
 #endif
 #ifndef STEP_MIN_GYRO_DPS
-#define STEP_MIN_GYRO_DPS 10.0f
+#define STEP_MIN_GYRO_DPS 7.5f
 #endif
 #ifndef STEP_MIN_INTERVAL_S
-#define STEP_MIN_INTERVAL_S 0.35f
+#define STEP_MIN_INTERVAL_S 0.32f
 #endif
 #ifndef STEP_MAX_INTERVAL_S
-#define STEP_MAX_INTERVAL_S 1.75f
+#define STEP_MAX_INTERVAL_S 2.2f
 #endif
 #ifndef WALKING_IDLE_TIMEOUT_S
-#define WALKING_IDLE_TIMEOUT_S 1.6f
+#define WALKING_IDLE_TIMEOUT_S 2.0f
 #endif
 #ifndef WALKING_MIN_STEPS
-#define WALKING_MIN_STEPS 3
+#define WALKING_MIN_STEPS 2
+#endif
+
+/* ========== 0.96" SPI OLED (SSD1306, 128x64) ========== */
+#ifndef OLED_ENABLE
+#define OLED_ENABLE 1
+#endif
+/* VSPI on ESP32: SCK=18 MOSI=23 (use SPI3_HOST in driver code). */
+#ifndef OLED_SPI_HOST_ID
+#define OLED_SPI_HOST_ID 2
+#endif
+#ifndef OLED_PIN_MOSI
+#define OLED_PIN_MOSI 23
+#endif
+#ifndef OLED_PIN_CLK
+#define OLED_PIN_CLK 18
+#endif
+#ifndef OLED_PIN_DC
+#define OLED_PIN_DC 2
+#endif
+#ifndef OLED_PIN_CS
+#define OLED_PIN_CS 5
+#endif
+#ifndef OLED_PIN_RST
+#define OLED_PIN_RST 4
+#endif
+#ifndef OLED_WIDTH
+#define OLED_WIDTH 128
+#endif
+#ifndef OLED_HEIGHT
+#define OLED_HEIGHT 64
+#endif
+#ifndef OLED_REFRESH_MS
+#define OLED_REFRESH_MS 400
+#endif
+/* Most 0.96" SPI modules are SH1106; use OLED_CTRL_SSD1306 if yours is SSD1306. */
+#ifndef OLED_CTRL_SSD1306
+#define OLED_CTRL_SSD1306 0
+#endif
+#ifndef OLED_CTRL_SH1106
+#define OLED_CTRL_SH1106 1
+#endif
+#ifndef OLED_CONTROLLER
+#define OLED_CONTROLLER OLED_CTRL_SH1106
+#endif
+#ifndef OLED_SPI_HZ
+#define OLED_SPI_HZ 4000000
 #endif

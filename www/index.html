@@ -84,12 +84,19 @@
     dir.position.set(3, 5, 2);
     scene.add(dir);
 
+    const avatar = new THREE.Group();
+    scene.add(avatar);
+
     const boxMaterial = new THREE.MeshStandardMaterial({
       color: 0x4a9eff, metalness: 0.2, roughness: 0.5
     });
     const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.35), boxMaterial);
-    scene.add(box);
-    scene.add(new THREE.AxesHelper(1.5));
+    avatar.add(box);
+    avatar.add(new THREE.AxesHelper(1.5));
+
+    const STEP_DISTANCE = 0.5;
+    const GYRO_DEADBAND_DPS = 0.8;
+    const stepDir = new THREE.Vector3();
 
     let ws;
     let frameCount = 0;
@@ -97,8 +104,44 @@
     let lastQuat = { w: 1, x: 0, y: 0, z: 0 };
     let lastQuatChange = 0;
     let lastMsgTime = 0;
+    let lastHeadingTs = 0;
     let lastWalking = false;
     let lastWalkingTime = 0;
+    let heading = 0;
+    let lastSteps = 0;
+
+    function quatYawRad() {
+      const e = new THREE.Euler(0, 0, 0, 'YXZ');
+      e.setFromQuaternion(box.quaternion);
+      return e.y;
+    }
+
+    function resetAvatarPose() {
+      avatar.position.set(0, 0, 0);
+      heading = 0;
+      lastSteps = 0;
+      lastHeadingTs = 0;
+    }
+
+    function updateHeading(gzDps, nowMs, snapFromQuat) {
+      if (snapFromQuat) {
+        heading = quatYawRad();
+        lastHeadingTs = nowMs;
+        return;
+      }
+      if (lastHeadingTs > 0) {
+        const dt = Math.min((nowMs - lastHeadingTs) / 1000, 0.08);
+        const gz = Math.abs(gzDps) < GYRO_DEADBAND_DPS ? 0 : gzDps;
+        heading += (gz * Math.PI / 180) * dt;
+      }
+      lastHeadingTs = nowMs;
+    }
+
+    function advanceWalk(stepsDelta) {
+      if (stepsDelta <= 0) return;
+      stepDir.set(Math.sin(heading), 0, -Math.cos(heading));
+      avatar.position.addScaledVector(stepDir, STEP_DISTANCE * stepsDelta);
+    }
 
     function setStatus(text, ok) {
       statusEl.textContent = text;
@@ -164,6 +207,7 @@
         lastQuatChange = 0;
         lastWalking = false;
         lastWalkingTime = 0;
+        resetAvatarPose();
         setActivity(false, 0);
         setStatus('Connected — waiting for data…', true);
         ws.send('hello');
@@ -178,17 +222,30 @@
           const q = JSON.parse(ev.data);
           const now = performance.now();
           const walking = !!q.walking;
+          const steps = q.steps || 0;
+          const gz = typeof q.gz === 'number' ? q.gz : 0;
           box.quaternion.set(q.x, q.y, q.z, q.w);
-          setActivity(walking, q.steps || 0);
+          setActivity(walking, steps);
+          const quatSnap = quatChanged(q);
+          updateHeading(gz, now, quatSnap);
+          if (quatSnap) {
+            lastQuat = q;
+            lastQuatChange = now;
+          }
+          if (steps < lastSteps) {
+            resetAvatarPose();
+          }
+          if (steps > lastSteps) {
+            if (walking) {
+              advanceWalk(steps - lastSteps);
+            }
+            lastSteps = steps;
+          }
           frameCount++;
           lastMsgTime = now;
           if (walking !== lastWalking) {
             lastWalking = walking;
             lastWalkingTime = now;
-          }
-          if (quatChanged(q)) {
-            lastQuat = q;
-            lastQuatChange = now;
           }
           if (walking) {
             setStatus('Live IMU data', true);
@@ -200,6 +257,7 @@
     }
 
     resetBtn.onclick = () => {
+      resetAvatarPose();
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send('reset');
       }

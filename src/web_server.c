@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "icm20948.h"
 #include "imu_fusion.h"
 #include "step_detect.h"
 #include "index_html.h"
@@ -20,7 +21,7 @@ static int s_ws_fd = -1;
 typedef struct {
     httpd_handle_t hd;
     int fd;
-    char msg[128];
+    char msg[160];
 } ws_send_arg_t;
 
 static void ws_send_work(void *arg)
@@ -53,10 +54,12 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
     float w, x, y, z;
     bool walking = step_detect_is_walking();
     uint32_t steps = step_detect_get_step_count();
+    float gz_dps = icm20948_get_yaw_rate_dps();
     imu_fusion_get_display_quat(&w, &x, &y, &z);
     snprintf(a->msg, sizeof(a->msg),
-             "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"walking\":%s,\"steps\":%lu}",
-             w, x, y, z, walking ? "true" : "false", (unsigned long)steps);
+             "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"gz\":%.2f,"
+             "\"walking\":%s,\"steps\":%lu}",
+             w, x, y, z, gz_dps, walking ? "true" : "false", (unsigned long)steps);
     a->hd = hd;
     a->fd = fd;
 

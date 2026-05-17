@@ -48,6 +48,7 @@ static int      s_scl_gpio;
 static uint32_t s_i2c_hz;
 
 static float s_gyro_bias_dps[3];
+static volatile float s_yaw_rate_dps;
 static bool  s_gyro_calibrated;
 static uint32_t s_gyro_cal_count;
 static float s_gyro_cal_sum[3];
@@ -405,6 +406,7 @@ static void icm20948_motion_task(void *arg)
                 gyd -= s_gyro_bias_dps[1];
                 gzd -= s_gyro_bias_dps[2];
                 gyro_mag = sqrtf(gxd * gxd + gyd * gyd + gzd * gzd);
+                s_yaw_rate_dps = gzd;
 
                 step_detect_update(axg, ayg, azg, gyro_mag);
 
@@ -434,6 +436,14 @@ static void icm20948_motion_task(void *arg)
         }
         vTaskDelay(period);
     }
+}
+
+float icm20948_get_yaw_rate_dps(void)
+{
+    if (!s_gyro_calibrated) {
+        return 0.0f;
+    }
+    return s_yaw_rate_dps;
 }
 
 esp_err_t icm20948_start_task(void)
