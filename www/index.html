@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IMU 3D Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #1a1a2e; font-family: system-ui, sans-serif; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      color: #eee; background: rgba(0,0,0,0.55); padding: 10px 14px;
+      border-radius: 8px; font-size: 14px; line-height: 1.5;
+    }
+    #hud button {
+      margin-top: 8px; padding: 6px 14px; cursor: pointer;
+      border: none; border-radius: 6px; background: #4a9eff; color: #fff;
+      font-size: 14px;
+    }
+    #hud button:hover { background: #3a8eef; }
+    #ipRow { margin-top: 8px; display: flex; gap: 6px; align-items: center; }
+    #ipRow input {
+      width: 130px; padding: 4px 8px; border-radius: 4px; border: none;
+      font-size: 13px;
+    }
+    .ok { color: #6f6; }
+    .err { color: #f66; }
+    #activity {
+      margin-top: 6px; padding: 6px 10px; border-radius: 6px;
+      font-weight: 600; letter-spacing: 0.02em;
+    }
+    #activity.still { background: rgba(255,255,255,0.08); color: #bbb; }
+    #activity.walking { background: rgba(80,200,120,0.25); color: #8f8; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="status">Connecting…</div>
+    <div id="fps">FPS: —</div>
+    <div id="activity" class="still">Still</div>
+    <div id="ipRow" hidden>
+      <input id="espIp" type="text" placeholder="192.168.0.195" />
+      <button id="connectBtn" type="button">Connect</button>
+    </div>
+    <button id="resetBtn" type="button">Reset orientation</button>
+  </div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const statusEl = document.getElementById('status');
+    const fpsEl = document.getElementById('fps');
+    const activityEl = document.getElementById('activity');
+    const resetBtn = document.getElementById('resetBtn');
+    const ipRow = document.getElementById('ipRow');
+    const espIpInput = document.getElementById('espIp');
+    const connectBtn = document.getElementById('connectBtn');
+    const servedFromEsp = location.protocol === 'http:' || location.protocol === 'https:';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+    camera.position.set(2.5, 2, 2.5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(3, 5, 2);
+    scene.add(dir);
+
+    const boxMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4a9eff, metalness: 0.2, roughness: 0.5
+    });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.35), boxMaterial);
+    scene.add(box);
+    scene.add(new THREE.AxesHelper(1.5));
+
+    let ws;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let lastQuat = { w: 1, x: 0, y: 0, z: 0 };
+    let lastQuatChange = 0;
+    let lastMsgTime = 0;
+    let lastWalking = false;
+    let lastWalkingTime = 0;
+
+    function setStatus(text, ok) {
+      statusEl.textContent = text;
+      statusEl.className = ok ? 'ok' : 'err';
+    }
+
+    function setActivity(walking, steps) {
+      if (walking) {
+        activityEl.textContent = `Walking · ${steps} steps`;
+        activityEl.className = 'walking';
+        boxMaterial.color.setHex(0x5fd68a);
+      } else {
+        activityEl.textContent = steps > 0 ? `Still · ${steps} steps` : 'Still';
+        activityEl.className = 'still';
+        boxMaterial.color.setHex(0x4a9eff);
+      }
+    }
+
+    function quatChanged(q) {
+      const e = 0.0005;
+      return Math.abs(q.w - lastQuat.w) > e || Math.abs(q.x - lastQuat.x) > e ||
+             Math.abs(q.y - lastQuat.y) > e || Math.abs(q.z - lastQuat.z) > e;
+    }
+
+    function wsUrl() {
+      const q = new URLSearchParams(location.search).get('ip');
+      if (q) {
+        return `ws://${q}/ws`;
+      }
+      if (servedFromEsp && location.host) {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${proto}//${location.host}/ws`;
+      }
+      const ip = (espIpInput.value || localStorage.getItem('espIp') || '').trim();
+      if (!ip) {
+        return null;
+      }
+      localStorage.setItem('espIp', ip);
+      return `ws://${ip}/ws`;
+    }
+
+    function connect() {
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+      }
+
+      const url = wsUrl();
+      if (!url) {
+        setStatus('Enter ESP32 IP below (from serial monitor)', false);
+        return;
+      }
+
+      if (!servedFromEsp) {
+        setStatus(`Connecting to ${url}…`, true);
+      }
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        lastMsgTime = 0;
+        lastQuatChange = 0;
+        lastWalking = false;
+        lastWalkingTime = 0;
+        setActivity(false, 0);
+        setStatus('Connected — waiting for data…', true);
+        ws.send('hello');
+      };
+      ws.onclose = () => {
+        setStatus('Disconnected — retrying…', false);
+        setTimeout(connect, 2000);
+      };
+      ws.onerror = () => setStatus(`WebSocket failed (${url})`, false);
+      ws.onmessage = (ev) => {
+        try {
+          const q = JSON.parse(ev.data);
+          const now = performance.now();
+          const walking = !!q.walking;
+          box.quaternion.set(q.x, q.y, q.z, q.w);
+          setActivity(walking, q.steps || 0);
+          frameCount++;
+          lastMsgTime = now;
+          if (walking !== lastWalking) {
+            lastWalking = walking;
+            lastWalkingTime = now;
+          }
+          if (quatChanged(q)) {
+            lastQuat = q;
+            lastQuatChange = now;
+          }
+          if (walking) {
+            setStatus('Live IMU data', true);
+          } else if (lastQuatChange > 0) {
+            setStatus('Live IMU data', true);
+          }
+        } catch (_) {}
+      };
+    }
+
+    resetBtn.onclick = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('reset');
+      }
+    };
+
+    if (!servedFromEsp) {
+      ipRow.hidden = false;
+      espIpInput.value = localStorage.getItem('espIp') || '';
+      setStatus('Open http://ESP_IP/ from serial — or enter IP here', false);
+      connectBtn.onclick = () => connect();
+    } else {
+      connect();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        fpsEl.textContent = `FPS: ${frameCount}`;
+        frameCount = 0;
+        lastFpsTime = now;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          if (lastMsgTime === 0) {
+            const hint = servedFromEsp
+              ? 'Connected — no data from ESP (reflash firmware)'
+              : 'Connected — no data. Open http://ESP_IP/ in the browser';
+            setStatus(hint, false);
+          } else if (lastWalking && now - lastWalkingTime < 3000) {
+            setStatus('Live IMU data', true);
+          } else if (now - lastQuatChange > 2000) {
+            setStatus('Streaming OK — device still', true);
+          } else if (lastQuatChange > 0) {
+            setStatus('Live IMU data', true);
+          }
+        }
+      }
+    }
+    animate();
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
