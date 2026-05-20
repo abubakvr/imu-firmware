@@ -11,8 +11,11 @@
 #include "freertos/task.h"
 #include "app_status.h"
 #include "config.h"
+#include "health_sensors.h"
 #include "icm20948.h"
+#include "mq135.h"
 #include "imu_fusion.h"
+#include "sensor_status.h"
 #include "nvs_flash.h"
 #include "oled_display.h"
 #include "web_server.h"
@@ -129,6 +132,15 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     app_status_init();
+    sensor_status_init();
+
+#if MQ135_ENABLE
+    if (mq135_init() == ESP_OK) {
+        mq135_start_task();
+    } else {
+        ESP_LOGW(TAG, "MQ135 init failed — check AO on GPIO%d", MQ135_ADC_GPIO);
+    }
+#endif
 
 #if OLED_ENABLE
     if (oled_display_init() == ESP_OK) {
@@ -145,9 +157,18 @@ void app_main(void)
     app_status_set_imu_ok(imu_ok);
     if (imu_ok) {
         ESP_ERROR_CHECK(icm20948_start_task());
+#if HEALTH_SENSORS_ENABLE
+        i2c_master_bus_handle_t bus = icm20948_get_i2c_bus();
+        if (health_sensors_init(bus) == ESP_OK) {
+            health_sensors_start_task();
+        } else {
+            ESP_LOGW(TAG, "health sensors not found (MAX30102 0x57, CJMCU-30205)");
+        }
+#endif
     } else {
         ESP_LOGE(TAG, "ICM20948 init failed — web UI will load but box will not move");
-        ESP_LOGE(TAG, "use SDA=GPIO21 SCL=GPIO22, NCS→3.3V, AD0→GND for 0x68");
+        ESP_LOGE(TAG, "use SDA=GPIO%d SCL=GPIO%d, NCS→3.3V, AD0→GND for 0x68",
+                 ICM20948_SDA_GPIO, ICM20948_SCL_GPIO);
     }
 
 #if OLED_ENABLE

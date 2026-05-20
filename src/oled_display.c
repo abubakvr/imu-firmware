@@ -2,6 +2,7 @@
 
 #include "app_status.h"
 #include "config.h"
+#include "sensor_status.h"
 #include "step_detect.h"
 
 #include <stdio.h>
@@ -70,6 +71,7 @@ static const glyph6x8_t s_glyphs[] = {
     {'V', {0x1F, 0x20, 0x40, 0x20, 0x1F, 0}},
     {'W', {0x7F, 0x20, 0x18, 0x20, 0x7F, 0}},
     {'Y', {0x07, 0x08, 0x70, 0x08, 0x07, 0}},
+    {'%', {0x23, 0x13, 0x08, 0x64, 0x62, 0}},
 };
 
 static esp_err_t spi_send(const uint8_t *data, size_t len)
@@ -263,28 +265,46 @@ static void render_status_screen(void)
     bool imu = app_status_imu_ok();
     bool walking = step_detect_is_walking();
     uint32_t steps = step_detect_get_step_count();
-    const char *ip = app_status_ip();
 
     fb_clear();
-    snprintf(line, sizeof(line), "WiFi: %s", wifi ? "OK" : "--");
+
+    if (sensor_status_temp_valid()) {
+        snprintf(line, sizeof(line), "T %.1fC", sensor_status_temp_c());
+    } else {
+        snprintf(line, sizeof(line), "T --");
+    }
     fb_draw_text(0, 0, line);
 
-    if (wifi && ip[0]) {
-        snprintf(line, sizeof(line), "IP %s", ip);
+    if (sensor_status_vitals_valid() && sensor_status_hr_bpm() > 0) {
+        snprintf(line, sizeof(line), "HR %d", sensor_status_hr_bpm());
     } else {
-        snprintf(line, sizeof(line), "IP --");
+        snprintf(line, sizeof(line), "HR --");
     }
     fb_draw_text(0, 10, line);
 
-    snprintf(line, sizeof(line), "IMU: %s", imu ? "OK" : "--");
+    if (sensor_status_vitals_valid() && sensor_status_spo2_pct() > 0) {
+        snprintf(line, sizeof(line), "SpO2 %d%%", sensor_status_spo2_pct());
+    } else {
+        snprintf(line, sizeof(line), "SpO2 --");
+    }
     fb_draw_text(0, 20, line);
 
-    fb_draw_text(0, 32, walking ? "WALKING" : "STILL");
+#if MQ135_ENABLE
+    if (sensor_status_mq135_valid()) {
+        snprintf(line, sizeof(line), "Gas %d", sensor_status_mq135_raw());
+    } else {
+        snprintf(line, sizeof(line), "Gas --");
+    }
+    fb_draw_text(0, 30, line);
+#endif
 
-    snprintf(line, sizeof(line), "Steps: %lu", (unsigned long)steps);
-    fb_draw_text(0, 42, line);
+    fb_draw_text(0, 40, walking ? "WALKING" : "STILL");
 
-    fb_draw_text(0, 54, "IMU tracker");
+    snprintf(line, sizeof(line), "Steps %lu", (unsigned long)steps);
+    fb_draw_text(0, 48, line);
+
+    snprintf(line, sizeof(line), "WiFi %s IMU %s", wifi ? "OK" : "--", imu ? "OK" : "--");
+    fb_draw_text(0, 56, line);
     panel_flush();
 }
 

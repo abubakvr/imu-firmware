@@ -3,7 +3,6 @@
 #include "config.h"
 #include "imu_fusion.h"
 #include "step_detect.h"
-#include "step_detect.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -49,6 +48,7 @@ static uint32_t s_i2c_hz;
 
 static float s_gyro_bias_dps[3];
 static volatile float s_yaw_rate_dps;
+static volatile bool s_imu_still = true;
 static bool  s_gyro_calibrated;
 static uint32_t s_gyro_cal_count;
 static float s_gyro_cal_sum[3];
@@ -410,7 +410,15 @@ static void icm20948_motion_task(void *arg)
 
                 step_detect_update(axg, ayg, azg, gyro_mag);
 
-                if (gyro_mag >= GYRO_STATIONARY_DPS) {
+                if (s_imu_still) {
+                    if (gyro_mag >= GYRO_STILL_OFF_DPS) {
+                        s_imu_still = false;
+                    }
+                } else if (gyro_mag < GYRO_STILL_ON_DPS) {
+                    s_imu_still = true;
+                }
+
+                if (!s_imu_still) {
                     imu_fusion_update(gxd * DEG_TO_RAD, gyd * DEG_TO_RAD, gzd * DEG_TO_RAD,
                                       axg, ayg, azg, dt);
                 }
@@ -444,6 +452,16 @@ float icm20948_get_yaw_rate_dps(void)
         return 0.0f;
     }
     return s_yaw_rate_dps;
+}
+
+bool icm20948_is_still(void)
+{
+    return s_gyro_calibrated && s_imu_still;
+}
+
+i2c_master_bus_handle_t icm20948_get_i2c_bus(void)
+{
+    return s_i2c_installed ? s_bus : NULL;
 }
 
 esp_err_t icm20948_start_task(void)

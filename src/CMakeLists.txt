@@ -8,7 +8,10 @@ idf_component_register(
         "index_html.c"
         "app_status.c"
         "oled_display.c"
-    INCLUDE_DIRS "."
+        "health_sensors.c"
+        "sensor_status.c"
+        "mq135.c"
+    INCLUDE_DIRS "../include"
     REQUIRES
         nvs_flash
         esp_wifi
@@ -16,4 +19,5 @@ idf_component_register(
         esp_event
         driver
         esp_http_server
+        esp_adc
 )

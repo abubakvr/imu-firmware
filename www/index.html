@@ -31,6 +31,22 @@
     }
     #activity.still { background: rgba(255,255,255,0.08); color: #bbb; }
     #activity.walking { background: rgba(80,200,120,0.25); color: #8f8; }
+    #vitals {
+      position: fixed; top: 12px; right: 12px; z-index: 10;
+      color: #eee; background: rgba(0,0,0,0.55); padding: 12px 16px;
+      border-radius: 8px; font-size: 14px; line-height: 1.6; min-width: 148px;
+    }
+    #vitals h3 {
+      margin: 0 0 8px; font-size: 12px; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase; color: #aaa;
+    }
+    #vitals .row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px;
+    }
+    #vitals .label { color: #bbb; }
+    #vitals .value { font-weight: 600; font-variant-numeric: tabular-nums; }
+    #vitals .value.missing { color: #888; font-weight: 400; }
   </style>
 </head>
 <body>
@@ -44,6 +60,13 @@
     </div>
     <button id="resetBtn" type="button">Reset orientation</button>
   </div>
+  <div id="vitals">
+    <h3>Vitals</h3>
+    <div class="row"><span class="label">Temp</span><span class="value missing" id="vTemp">--</span></div>
+    <div class="row"><span class="label">Heart rate</span><span class="value missing" id="vHr">--</span></div>
+    <div class="row"><span class="label">SpO2</span><span class="value missing" id="vSpo2">--</span></div>
+    <div class="row"><span class="label">Air (MQ135)</span><span class="value missing" id="vGas">--</span></div>
+  </div>
   <script type="importmap">
   {
     "imports": {
@@ -55,6 +78,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
     const statusEl = document.getElementById('status');
     const fpsEl = document.getElementById('fps');
@@ -63,7 +87,20 @@
     const ipRow = document.getElementById('ipRow');
     const espIpInput = document.getElementById('espIp');
     const connectBtn = document.getElementById('connectBtn');
+    const vTempEl = document.getElementById('vTemp');
+    const vHrEl = document.getElementById('vHr');
+    const vSpo2El = document.getElementById('vSpo2');
+    const vGasEl = document.getElementById('vGas');
     const servedFromEsp = location.protocol === 'http:' || location.protocol === 'https:';
+
+    /* Poly Pizza hardhat: https://poly.pizza/m/cyjbHPC6QAM (CC Attribution, Poly by Google) */
+    const HELMET_GLB_LOCAL = 'models/helmet.glb';
+    const HELMET_GLB_CDN =
+      'https://static.poly.pizza/535cb2d4-eb2a-441d-899b-d0a5ebd3e37d.glb';
+    const HELMET_GLB = servedFromEsp ? HELMET_GLB_CDN : HELMET_GLB_LOCAL;
+    const HELMET_ROT_X = 0;
+    const HELMET_ROT_Y = 0;
+    const HELMET_ROT_Z = 0;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
@@ -74,29 +111,169 @@
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
     renderer.setPixelRatio(devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
     document.body.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
     dir.position.set(3, 5, 2);
     scene.add(dir);
+    const fill = new THREE.DirectionalLight(0xaaccff, 0.35);
+    fill.position.set(-2, 1, -3);
+    scene.add(fill);
 
     const avatar = new THREE.Group();
     scene.add(avatar);
 
-    const boxMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a9eff, metalness: 0.2, roughness: 0.5
-    });
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.35), boxMaterial);
-    avatar.add(box);
-    avatar.add(new THREE.AxesHelper(1.5));
+    const helmetPivot = new THREE.Group();
+    avatar.add(helmetPivot);
+    avatar.add(new THREE.AxesHelper(1.2));
 
+    const displayQuat = new THREE.Quaternion();
+    const STILL_QUAT_EPS = 0.0008;
     const STEP_DISTANCE = 0.5;
-    const GYRO_DEADBAND_DPS = 0.8;
+    const GYRO_DEADBAND_DPS = 2.0;
     const stepDir = new THREE.Vector3();
+
+    let helmetScene = null;
+    const helmetTint = { still: 0xf5f5f5, walk: 0xd8f5dc };
+
+    function buildSafetyHelmet() {
+      const helmet = new THREE.Group();
+      const shell = new THREE.MeshStandardMaterial({
+        color: helmetTint.still,
+        roughness: 0.42,
+        metalness: 0.06,
+      });
+
+      const profile = [
+        new THREE.Vector2(0.0, 0.52),
+        new THREE.Vector2(0.22, 0.5),
+        new THREE.Vector2(0.34, 0.38),
+        new THREE.Vector2(0.38, 0.22),
+        new THREE.Vector2(0.4, 0.1),
+        new THREE.Vector2(0.62, 0.05),
+        new THREE.Vector2(0.72, 0.02),
+        new THREE.Vector2(0.74, 0.0),
+      ];
+      const body = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 40),
+        shell
+      );
+      body.position.y = -0.02;
+      helmet.add(body);
+
+      const brim = new THREE.Mesh(
+        new THREE.TorusGeometry(0.7, 0.045, 12, 40),
+        shell
+      );
+      brim.rotation.x = Math.PI / 2;
+      brim.position.y = 0.02;
+      helmet.add(brim);
+
+      const peak = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.04, 0.22),
+        shell
+      );
+      peak.position.set(0, 0.34, 0.38);
+      helmet.add(peak);
+
+      const button = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, 0.03, 12),
+        shell
+      );
+      button.position.set(0, 0.5, 0);
+      helmet.add(button);
+
+      helmet.scale.setScalar(1.2);
+      return helmet;
+    }
+
+    function normalizeHelmetModel(root) {
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+      const scale = 1.1 / maxDim;
+      root.position.sub(center);
+      root.position.multiplyScalar(scale);
+      root.scale.setScalar(scale);
+      root.rotation.set(HELMET_ROT_X, HELMET_ROT_Y, HELMET_ROT_Z);
+      root.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat.color) mat.color.setHex(helmetTint.still);
+          if (mat.metalness !== undefined) mat.metalness = Math.min(mat.metalness, 0.15);
+        }
+      });
+    }
+
+    function loadHelmetGlb(url) {
+      return new Promise((resolve, reject) => {
+        new GLTFLoader().load(
+          url,
+          (gltf) => {
+            normalizeHelmetModel(gltf.scene);
+            resolve(gltf.scene);
+          },
+          undefined,
+          reject
+        );
+      });
+    }
+
+    function setHelmetTint(hex) {
+      if (!helmetScene) return;
+      helmetScene.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (mat.color) mat.color.setHex(hex);
+        }
+      });
+    }
+
+    function applyOrientation(q, lockStill) {
+      const incoming = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+      if (lockStill) {
+        return;
+      }
+      if (displayQuat.dot(incoming) < 0) {
+        incoming.x = -incoming.x;
+        incoming.y = -incoming.y;
+        incoming.z = -incoming.z;
+        incoming.w = -incoming.w;
+      }
+      const dot = Math.abs(displayQuat.dot(incoming));
+      if (dot > 1 - STILL_QUAT_EPS) {
+        return;
+      }
+      displayQuat.copy(incoming);
+      helmetPivot.quaternion.copy(displayQuat);
+    }
+
+    async function initHelmet() {
+      const urls = [HELMET_GLB, HELMET_GLB_CDN, HELMET_GLB_LOCAL].filter(
+        (u, i, a) => u && a.indexOf(u) === i
+      );
+      for (const url of urls) {
+        try {
+          helmetScene = await loadHelmetGlb(url);
+          helmetPivot.add(helmetScene);
+          return;
+        } catch (e) {
+          console.warn('helmet load failed:', url, e);
+        }
+      }
+      helmetScene = buildSafetyHelmet();
+      helmetPivot.add(helmetScene);
+    }
+    initHelmet();
 
     let ws;
     let frameCount = 0;
@@ -112,7 +289,7 @@
 
     function quatYawRad() {
       const e = new THREE.Euler(0, 0, 0, 'YXZ');
-      e.setFromQuaternion(box.quaternion);
+      e.setFromQuaternion(helmetPivot.quaternion);
       return e.y;
     }
 
@@ -121,6 +298,8 @@
       heading = 0;
       lastSteps = 0;
       lastHeadingTs = 0;
+      displayQuat.set(0, 0, 0, 1);
+      helmetPivot.quaternion.set(0, 0, 0, 1);
     }
 
     function updateHeading(gzDps, nowMs, snapFromQuat) {
@@ -148,15 +327,43 @@
       statusEl.className = ok ? 'ok' : 'err';
     }
 
+    function setVital(el, text, ok) {
+      el.textContent = text;
+      el.classList.toggle('missing', !ok);
+    }
+
+    function updateVitals(q) {
+      if (typeof q.temp === 'number' && !Number.isNaN(q.temp)) {
+        setVital(vTempEl, `${q.temp.toFixed(1)} °C`, true);
+      } else {
+        setVital(vTempEl, '--', false);
+      }
+      if (typeof q.hr === 'number' && q.hr > 0) {
+        setVital(vHrEl, `${q.hr} bpm`, true);
+      } else {
+        setVital(vHrEl, '--', false);
+      }
+      if (typeof q.spo2 === 'number' && q.spo2 > 0) {
+        setVital(vSpo2El, `${q.spo2}%`, true);
+      } else {
+        setVital(vSpo2El, '--', false);
+      }
+      if (typeof q.mq135 === 'number' && q.mq135 >= 0) {
+        setVital(vGasEl, `${q.mq135}`, true);
+      } else {
+        setVital(vGasEl, '--', false);
+      }
+    }
+
     function setActivity(walking, steps) {
       if (walking) {
         activityEl.textContent = `Walking · ${steps} steps`;
         activityEl.className = 'walking';
-        boxMaterial.color.setHex(0x5fd68a);
+        setHelmetTint(helmetTint.walk);
       } else {
         activityEl.textContent = steps > 0 ? `Still · ${steps} steps` : 'Still';
         activityEl.className = 'still';
-        boxMaterial.color.setHex(0x4a9eff);
+        setHelmetTint(helmetTint.still);
       }
     }
 
@@ -209,6 +416,7 @@
         lastWalkingTime = 0;
         resetAvatarPose();
         setActivity(false, 0);
+        updateVitals({});
         setStatus('Connected — waiting for data…', true);
         ws.send('hello');
       };
@@ -222,10 +430,13 @@
           const q = JSON.parse(ev.data);
           const now = performance.now();
           const walking = !!q.walking;
+          const imuStill = q.still === true;
           const steps = q.steps || 0;
           const gz = typeof q.gz === 'number' ? q.gz : 0;
-          box.quaternion.set(q.x, q.y, q.z, q.w);
+
+          applyOrientation(q, imuStill && !walking);
           setActivity(walking, steps);
+          updateVitals(q);
           const quatSnap = quatChanged(q);
           updateHeading(gz, now, quatSnap);
           if (quatSnap) {
@@ -250,7 +461,7 @@
           if (walking) {
             setStatus('Live IMU data', true);
           } else if (lastQuatChange > 0) {
-            setStatus('Live IMU data', true);
+            setStatus('Streaming OK — device still', true);
           }
         } catch (_) {}
       };

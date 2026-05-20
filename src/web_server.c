@@ -11,18 +11,45 @@
 #include "freertos/task.h"
 #include "icm20948.h"
 #include "imu_fusion.h"
+#include "sensor_status.h"
 #include "step_detect.h"
 #include "index_html.h"
 
 static const char *TAG = "web";
 static httpd_handle_t s_server;
 static int s_ws_fd = -1;
+static bool s_ws_send_pending;
+static portMUX_TYPE s_ws_mux = portMUX_INITIALIZER_UNLOCKED;
 
 typedef struct {
     httpd_handle_t hd;
     int fd;
-    char msg[160];
+    char msg[256];
 } ws_send_arg_t;
+
+static int ws_fd_get(void)
+{
+    portENTER_CRITICAL(&s_ws_mux);
+    int fd = s_ws_fd;
+    portEXIT_CRITICAL(&s_ws_mux);
+    return fd;
+}
+
+static void ws_fd_set(int fd)
+{
+    portENTER_CRITICAL(&s_ws_mux);
+    s_ws_fd = fd;
+    portEXIT_CRITICAL(&s_ws_mux);
+}
+
+static void ws_fd_clear_if(int fd)
+{
+    portENTER_CRITICAL(&s_ws_mux);
+    if (s_ws_fd == fd) {
+        s_ws_fd = -1;
+    }
+    portEXIT_CRITICAL(&s_ws_mux);
+}
 
 static void ws_send_work(void *arg)
 {
@@ -34,9 +61,12 @@ static void ws_send_work(void *arg)
         .payload = (uint8_t *)a->msg,
         .len = strlen(a->msg),
     };
-    if (httpd_ws_send_frame_async(a->hd, a->fd, &frame) != ESP_OK) {
-        ESP_LOGW(TAG, "ws send failed fd=%d", a->fd);
+    esp_err_t err = httpd_ws_send_frame_async(a->hd, a->fd, &frame);
+    if (err != ESP_OK) {
+        ws_fd_clear_if(a->fd);
+        ESP_LOGW(TAG, "WebSocket send failed (fd=%d) — client gone?", a->fd);
     }
+    s_ws_send_pending = false;
     free(a);
 }
 
@@ -44,6 +74,9 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
 {
     if (!hd || fd < 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (s_ws_send_pending) {
+        return ESP_OK;
     }
 
     ws_send_arg_t *a = calloc(1, sizeof(*a));
@@ -56,15 +89,41 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
     uint32_t steps = step_detect_get_step_count();
     float gz_dps = icm20948_get_yaw_rate_dps();
     imu_fusion_get_display_quat(&w, &x, &y, &z);
-    snprintf(a->msg, sizeof(a->msg),
-             "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"gz\":%.2f,"
-             "\"walking\":%s,\"steps\":%lu}",
-             w, x, y, z, gz_dps, walking ? "true" : "false", (unsigned long)steps);
+
+    bool temp_ok = sensor_status_temp_valid();
+    float temp_c = sensor_status_temp_c();
+    int hr = sensor_status_hr_bpm();
+    int spo2 = sensor_status_spo2_pct();
+
+    bool still = icm20948_is_still();
+    int n = snprintf(a->msg, sizeof(a->msg),
+                     "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"gz\":%.2f,"
+                     "\"walking\":%s,\"still\":%s,\"steps\":%lu",
+                     w, x, y, z, gz_dps, walking ? "true" : "false", still ? "true" : "false",
+                     (unsigned long)steps);
+    if (temp_ok) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"temp\":%.1f", temp_c);
+    }
+    if (hr > 0) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"hr\":%d", hr);
+    }
+    if (spo2 > 0) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"spo2\":%d", spo2);
+    }
+    if (sensor_status_mq135_valid()) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq135\":%d",
+                      sensor_status_mq135_raw());
+    }
+    if (n > 0 && (size_t)n < sizeof(a->msg)) {
+        snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, "}");
+    }
     a->hd = hd;
     a->fd = fd;
 
+    s_ws_send_pending = true;
     esp_err_t err = httpd_queue_work(hd, ws_send_work, a);
     if (err != ESP_OK) {
+        s_ws_send_pending = false;
         free(a);
     }
     return err;
@@ -79,19 +138,27 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 /* Called by ESP-IDF after the WebSocket handshake (uri->handler is NOT). */
 static esp_err_t ws_post_handshake_cb(httpd_req_t *req)
 {
-    s_ws_fd = httpd_req_to_sockfd(req);
-    ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", s_ws_fd);
-    return queue_quat_send(req->handle, s_ws_fd);
+    int fd = httpd_req_to_sockfd(req);
+    ws_fd_set(fd);
+    ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
+    return queue_quat_send(req->handle, fd);
 }
 
 static esp_err_t ws_handler(httpd_req_t *req)
 {
-    s_ws_fd = httpd_req_to_sockfd(req);
+    int fd = httpd_req_to_sockfd(req);
+    ws_fd_set(fd);
 
     httpd_ws_frame_t frame = {0};
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) {
+        ws_fd_clear_if(fd);
         return ret;
+    }
+
+    if (frame.type == HTTPD_WS_TYPE_CLOSE) {
+        ws_fd_clear_if(fd);
+        return ESP_OK;
     }
 
     if (frame.len == 0) {
@@ -119,8 +186,9 @@ static void ws_broadcast_task(void *arg)
     const TickType_t period = pdMS_TO_TICKS(20);
 
     while (1) {
-        if (s_server && s_ws_fd >= 0) {
-            queue_quat_send(s_server, s_ws_fd);
+        int fd = ws_fd_get();
+        if (s_server && fd >= 0) {
+            queue_quat_send(s_server, fd);
         }
         vTaskDelay(period);
     }
