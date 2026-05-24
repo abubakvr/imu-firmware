@@ -289,11 +289,11 @@ static void render_status_screen(void)
     }
     fb_draw_text(0, 20, line);
 
-#if MQ135_ENABLE
-    if (sensor_status_mq135_valid()) {
-        snprintf(line, sizeof(line), "Gas %d", sensor_status_mq135_raw());
+#if MQ_GAS_ENABLE
+    if (sensor_status_mq_gas_valid(0)) {
+        snprintf(line, sizeof(line), "MQ135 %d", sensor_status_mq_gas_raw(0));
     } else {
-        snprintf(line, sizeof(line), "Gas --");
+        snprintf(line, sizeof(line), "MQ135 --");
     }
     fb_draw_text(0, 30, line);
 #endif

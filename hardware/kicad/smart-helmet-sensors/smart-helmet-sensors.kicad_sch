@@ -1,0 +1,1326 @@
+(kicad_sch
+	(version 20231120)
+	(generator "imu-firmware")
+	(uuid "a3f8c2e1-4b5d-6e7f-8091-a2b3c4d5e6f7")
+	(paper "A4")
+	(title_block
+		(title "Smart Helmet — Sensor Interconnect")
+		(date "2026-05-24")
+		(rev "1.0")
+		(company "imu-firmware")
+		(comment 1 "Block diagram from include/config.h")
+		(comment 2 "ESP32 DOIT DevKit V1 — sensors only")
+		(comment 3 "Open: smart-helmet-sensors.kicad_pro")
+		(comment 4 "No footprints assigned — interconnect reference")
+	)
+	(lib_symbols
+		(symbol "power:+3V3"
+			(power)
+			(pin_numbers hide)
+			(pin_names
+				(offset 0)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "#PWR"
+				(at 0 -3.81 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Value" "+3V3"
+				(at 0 3.556 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "+3V3_0_1"
+				(polyline
+					(pts
+						(xy -0.762 1.27) (xy 0 2.54)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0 2.54) (xy 0.762 1.27)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0 0) (xy 0 2.54)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "+3V3_1_1"
+				(pin power_in line
+					(at 0 0 90)
+					(length 0)
+					(name "~"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+		(symbol "power:GND"
+			(power)
+			(pin_numbers hide)
+			(pin_names
+				(offset 0)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "#PWR"
+				(at 0 -3.81 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Value" "GND"
+				(at 0 -6.35 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "GND_0_1"
+				(polyline
+					(pts
+						(xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) (xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "GND_1_1"
+				(pin power_in line
+					(at 0 0 270)
+					(length 0)
+					(name "~"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+	)
+	(text "Smart Helmet Sensor Bus — from imu-firmware config.h"
+		(exclude_from_sim no)
+		(at 25.4 15.24 0)
+		(effects
+			(font
+				(size 2.54 2.54)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000001")
+	)
+	(rectangle
+		(start 127 63.5)
+		(end 203.2 139.7)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000002")
+	)
+	(text "ESP32 DOIT DevKit V1"
+		(exclude_from_sim no)
+		(at 129.54 66.04 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000003")
+	)
+	(text "GPIO22  I2C_SDA\nGPIO21  I2C_SCL\nGPIO23  SPI_MOSI\nGPIO18  SPI_SCK\nGPIO2   OLED_DC\nGPIO5   OLED_CS\nGPIO4   OLED_RST\nGPIO34  MQ135_AO (ADC1)"
+		(exclude_from_sim no)
+		(at 129.54 76.2 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000004")
+	)
+	(rectangle
+		(start 15.24 48.26)
+		(end 88.9 127)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000010")
+	)
+	(text "I2C bus @ 100 kHz (shared)"
+		(exclude_from_sim no)
+		(at 17.78 50.8 0)
+		(effects
+			(font
+				(size 1.5 1.5)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000011")
+	)
+	(rectangle
+		(start 17.78 58.42)
+		(end 86.36 72.39)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type background)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000012")
+	)
+	(text "ICM-20948 IMU\nI2C 0x68\nAD0→GND  NCS→3V3"
+		(exclude_from_sim no)
+		(at 19.05 59.69 0)
+		(effects
+			(font
+				(size 1.143 1.143)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000013")
+	)
+	(rectangle
+		(start 17.78 76.2)
+		(end 86.36 90.17)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type background)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000014")
+	)
+	(text "MAX30102\nHR / SpO2\nI2C 0x57"
+		(exclude_from_sim no)
+		(at 19.05 77.47 0)
+		(effects
+			(font
+				(size 1.143 1.143)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000015")
+	)
+	(rectangle
+		(start 17.78 93.98)
+		(end 86.36 107.95)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type background)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000016")
+	)
+	(text "CJMCU-30205 / MAX30205\nTemp sensor\nI2C 0x4F"
+		(exclude_from_sim no)
+		(at 19.05 95.25 0)
+		(effects
+			(font
+				(size 1.143 1.143)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000017")
+	)
+	(text "SDA,SCL,VCC,GND\nparallel to ESP32"
+		(exclude_from_sim no)
+		(at 19.05 111.76 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+				(italic yes)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000018")
+	)
+	(rectangle
+		(start 213.36 58.42)
+		(end 292.1 120.65)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000020")
+	)
+	(text "0.96\" SPI OLED (SH1106)"
+		(exclude_from_sim no)
+		(at 215.9 60.96 0)
+		(effects
+			(font
+				(size 1.5 1.5)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000021")
+	)
+	(text "DIN  ← GPIO23 MOSI\nCLK  ← GPIO18 SCK\nDC   ← GPIO2\nCS   ← GPIO5\nRST  ← GPIO4\nVCC  ← 3V3\nGND"
+		(exclude_from_sim no)
+		(at 215.9 71.12 0)
+		(effects
+			(font
+				(size 1.143 1.143)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000022")
+	)
+	(rectangle
+		(start 114.3 152.4)
+		(end 195.58 177.8)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000030")
+	)
+	(text "MQ135 gas sensor"
+		(exclude_from_sim no)
+		(at 116.84 154.94 0)
+		(effects
+			(font
+				(size 1.5 1.5)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000031")
+	)
+	(text "AO  → GPIO34 (ADC1)\nVCC → 3V3\nGND\n(DO not used)"
+		(exclude_from_sim no)
+		(at 116.84 165.1 0)
+		(effects
+			(font
+				(size 1.143 1.143)
+			)
+			(justify left top)
+		)
+		(uuid "b1000001-0000-4000-8000-000000000032")
+	)
+	(symbol
+		(lib_id "power:+3V3")
+		(at 50.8 35.56 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "c1000001-0000-4000-8000-000000000001")
+		(property "Reference" "#PWR01"
+			(at 50.8 39.37 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 50.8 30.48 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "c1000001-0000-4000-8000-000000000002")
+		)
+		(instances
+			(project "smart-helmet-sensors"
+				(path "/a3f8c2e1-4b5d-6e7f-8091-a2b3c4d5e6f7"
+					(reference "#PWR01")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 76.2 35.56 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "c1000001-0000-4000-8000-000000000003")
+		(property "Reference" "#PWR02"
+			(at 76.2 39.37 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 76.2 30.48 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "c1000001-0000-4000-8000-000000000004")
+		)
+		(instances
+			(project "smart-helmet-sensors"
+				(path "/a3f8c2e1-4b5d-6e7f-8091-a2b3c4d5e6f7"
+					(reference "#PWR02")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 50.8 35.56) (xy 50.8 43.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000001")
+	)
+	(wire
+		(pts
+			(xy 76.2 35.56) (xy 76.2 43.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000002")
+	)
+	(wire
+		(pts
+			(xy 50.8 43.18) (xy 165.1 43.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000003")
+	)
+	(wire
+		(pts
+			(xy 76.2 43.18) (xy 165.1 43.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000004")
+	)
+	(wire
+		(pts
+			(xy 50.8 43.18) (xy 50.8 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000005")
+	)
+	(wire
+		(pts
+			(xy 76.2 43.18) (xy 76.2 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000006")
+	)
+	(wire
+		(pts
+			(xy 101.6 50.8) (xy 127 50.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000010")
+	)
+	(wire
+		(pts
+			(xy 101.6 60.96) (xy 127 60.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000011")
+	)
+	(wire
+		(pts
+			(xy 88.9 50.8) (xy 101.6 50.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000012")
+	)
+	(wire
+		(pts
+			(xy 88.9 60.96) (xy 101.6 60.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000013")
+	)
+	(wire
+		(pts
+			(xy 88.9 50.8) (xy 88.9 66.04)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000014")
+	)
+	(wire
+		(pts
+			(xy 88.9 60.96) (xy 88.9 83.82)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000015")
+	)
+	(wire
+		(pts
+			(xy 88.9 66.04) (xy 88.9 60.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000016")
+	)
+	(wire
+		(pts
+			(xy 88.9 83.82) (xy 88.9 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000017")
+	)
+	(wire
+		(pts
+			(xy 203.2 86.36) (xy 213.36 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000020")
+	)
+	(wire
+		(pts
+			(xy 203.2 96.52) (xy 213.36 96.52)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000021")
+	)
+	(wire
+		(pts
+			(xy 203.2 101.6) (xy 213.36 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000022")
+	)
+	(wire
+		(pts
+			(xy 203.2 106.68) (xy 213.36 106.68)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000023")
+	)
+	(wire
+		(pts
+			(xy 203.2 111.76) (xy 213.36 111.76)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000024")
+	)
+	(wire
+		(pts
+			(xy 165.1 43.18) (xy 165.1 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000025")
+	)
+	(wire
+		(pts
+			(xy 165.1 58.42) (xy 213.36 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000026")
+	)
+	(wire
+		(pts
+			(xy 50.8 58.42) (xy 17.78 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000033")
+	)
+	(wire
+		(pts
+			(xy 76.2 58.42) (xy 17.78 66.04)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000034")
+	)
+	(wire
+		(pts
+			(xy 17.78 66.04) (xy 17.78 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000035")
+	)
+	(wire
+		(pts
+			(xy 114.3 58.42) (xy 114.3 165.1)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000036")
+	)
+	(wire
+		(pts
+			(xy 114.3 58.42) (xy 50.8 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000037")
+	)
+	(wire
+		(pts
+			(xy 165.1 127) (xy 165.1 165.1)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000031")
+	)
+	(wire
+		(pts
+			(xy 114.3 165.1) (xy 165.1 165.1)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d1000001-0000-4000-8000-000000000032")
+	)
+	(junction
+		(at 88.9 60.96)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e1000001-0000-4000-8000-000000000001")
+	)
+	(junction
+		(at 101.6 50.8)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e1000001-0000-4000-8000-000000000002")
+	)
+	(junction
+		(at 101.6 60.96)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e1000001-0000-4000-8000-000000000003")
+	)
+	(junction
+		(at 165.1 43.18)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e1000001-0000-4000-8000-000000000004")
+	)
+	(global_label "+3V3"
+		(shape input)
+		(at 50.8 58.42 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000001")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 50.8 58.42 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "+3V3"
+		(shape input)
+		(at 114.3 58.42 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000004")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 114.3 58.42 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "+3V3"
+		(shape input)
+		(at 213.36 58.42 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000002")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 58.42 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GND"
+		(shape input)
+		(at 76.2 58.42 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000003")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 76.2 58.42 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SDA"
+		(shape bidirectional)
+		(at 88.9 50.8 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000010")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 88.9 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SDA"
+		(shape bidirectional)
+		(at 127 50.8 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000011")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 127 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SCL"
+		(shape bidirectional)
+		(at 88.9 60.96 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000012")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 88.9 60.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SCL"
+		(shape bidirectional)
+		(at 127 60.96 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000013")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 127 60.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SPI_MOSI"
+		(shape output)
+		(at 203.2 86.36 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000020")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 203.2 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SPI_MOSI"
+		(shape input)
+		(at 213.36 86.36 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000021")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SPI_SCK"
+		(shape output)
+		(at 203.2 96.52 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000022")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 203.2 96.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SPI_SCK"
+		(shape input)
+		(at 213.36 96.52 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000023")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 96.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_DC"
+		(shape output)
+		(at 203.2 101.6 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000024")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 203.2 101.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_DC"
+		(shape input)
+		(at 213.36 101.6 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000025")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 101.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_CS"
+		(shape output)
+		(at 203.2 106.68 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000026")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 203.2 106.68 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_CS"
+		(shape input)
+		(at 213.36 106.68 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000027")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 106.68 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_RST"
+		(shape output)
+		(at 203.2 111.76 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000028")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 203.2 111.76 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "OLED_RST"
+		(shape input)
+		(at 213.36 111.76 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000029")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 213.36 111.76 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "MQ135_AO"
+		(shape output)
+		(at 165.1 165.1 90)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000030")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 165.1 165.1 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "MQ135_AO"
+		(shape input)
+		(at 114.3 165.1 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000031")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 114.3 165.1 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(label "GPIO22"
+		(at 132.08 48.26 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000040")
+	)
+	(label "GPIO21"
+		(at 132.08 58.42 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000041")
+	)
+	(label "GPIO23"
+		(at 205.74 83.82 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000042")
+	)
+	(label "GPIO18"
+		(at 205.74 93.98 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000043")
+	)
+	(label "GPIO2"
+		(at 205.74 99.06 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000044")
+	)
+	(label "GPIO5"
+		(at 205.74 104.14 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000045")
+	)
+	(label "GPIO4"
+		(at 205.74 109.22 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000046")
+	)
+	(label "GPIO34"
+		(at 167.64 162.56 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "f1000001-0000-4000-8000-000000000047")
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

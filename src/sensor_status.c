@@ -11,8 +11,11 @@ static int s_hr_bpm;
 static int s_spo2_pct;
 static bool s_temp_valid;
 static bool s_vitals_valid;
-static int s_mq135_raw;
-static bool s_mq135_valid;
+
+#if MQ_GAS_ENABLE
+static int s_mq_raw[MQ_GAS_SENSOR_COUNT];
+static bool s_mq_valid[MQ_GAS_SENSOR_COUNT];
+#endif
 
 void sensor_status_init(void)
 {
@@ -22,8 +25,12 @@ void sensor_status_init(void)
     s_spo2_pct = 0;
     s_temp_valid = false;
     s_vitals_valid = false;
-    s_mq135_raw = 0;
-    s_mq135_valid = false;
+#if MQ_GAS_ENABLE
+    for (int i = 0; i < MQ_GAS_SENSOR_COUNT; i++) {
+        s_mq_raw[i] = 0;
+        s_mq_valid[i] = false;
+    }
+#endif
 }
 
 void sensor_status_set_temp(float celsius, bool valid)
@@ -49,16 +56,42 @@ void sensor_status_set_vitals(int hr_bpm, int spo2_pct, bool valid)
     xSemaphoreGive(s_lock);
 }
 
-void sensor_status_set_mq135(int raw, bool valid)
+#if MQ_GAS_ENABLE
+void sensor_status_set_mq_gas(int index, int raw, bool valid)
 {
-    if (!s_lock) {
+    if (!s_lock || index < 0 || index >= MQ_GAS_SENSOR_COUNT) {
         return;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_mq135_raw = raw;
-    s_mq135_valid = valid;
+    s_mq_raw[index] = raw;
+    s_mq_valid[index] = valid;
     xSemaphoreGive(s_lock);
 }
+
+bool sensor_status_mq_gas_valid(int index)
+{
+    bool v = false;
+    if (!s_lock || index < 0 || index >= MQ_GAS_SENSOR_COUNT) {
+        return false;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    v = s_mq_valid[index];
+    xSemaphoreGive(s_lock);
+    return v;
+}
+
+int sensor_status_mq_gas_raw(int index)
+{
+    int v = 0;
+    if (!s_lock || index < 0 || index >= MQ_GAS_SENSOR_COUNT) {
+        return 0;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    v = s_mq_raw[index];
+    xSemaphoreGive(s_lock);
+    return v;
+}
+#endif
 
 bool sensor_status_temp_valid(void)
 {
@@ -117,22 +150,18 @@ int sensor_status_spo2_pct(void)
 
 bool sensor_status_mq135_valid(void)
 {
-    bool v = false;
-    if (s_lock) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        v = s_mq135_valid;
-        xSemaphoreGive(s_lock);
-    }
-    return v;
+#if MQ_GAS_ENABLE
+    return sensor_status_mq_gas_valid(0);
+#else
+    return false;
+#endif
 }
 
 int sensor_status_mq135_raw(void)
 {
-    int v = 0;
-    if (s_lock) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        v = s_mq135_raw;
-        xSemaphoreGive(s_lock);
-    }
-    return v;
+#if MQ_GAS_ENABLE
+    return sensor_status_mq_gas_raw(0);
+#else
+    return 0;
+#endif
 }

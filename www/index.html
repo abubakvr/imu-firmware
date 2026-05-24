@@ -58,14 +58,17 @@
       <input id="espIp" type="text" placeholder="192.168.0.195" />
       <button id="connectBtn" type="button">Connect</button>
     </div>
-    <button id="resetBtn" type="button">Reset orientation</button>
+    <button id="resetBtn" type="button">Calibrate / zero</button>
   </div>
   <div id="vitals">
     <h3>Vitals</h3>
     <div class="row"><span class="label">Temp</span><span class="value missing" id="vTemp">--</span></div>
     <div class="row"><span class="label">Heart rate</span><span class="value missing" id="vHr">--</span></div>
     <div class="row"><span class="label">SpO2</span><span class="value missing" id="vSpo2">--</span></div>
-    <div class="row"><span class="label">Air (MQ135)</span><span class="value missing" id="vGas">--</span></div>
+    <div class="row"><span class="label">MQ-135</span><span class="value missing" id="vMq135">--</span></div>
+    <div class="row"><span class="label">MQ-136</span><span class="value missing" id="vMq136">--</span></div>
+    <div class="row"><span class="label">MQ-4</span><span class="value missing" id="vMq4">--</span></div>
+    <div class="row"><span class="label">MQ-7</span><span class="value missing" id="vMq7">--</span></div>
   </div>
   <script type="importmap">
   {
@@ -90,7 +93,10 @@
     const vTempEl = document.getElementById('vTemp');
     const vHrEl = document.getElementById('vHr');
     const vSpo2El = document.getElementById('vSpo2');
-    const vGasEl = document.getElementById('vGas');
+    const vMq135El = document.getElementById('vMq135');
+    const vMq136El = document.getElementById('vMq136');
+    const vMq4El = document.getElementById('vMq4');
+    const vMq7El = document.getElementById('vMq7');
     const servedFromEsp = location.protocol === 'http:' || location.protocol === 'https:';
 
     /* Poly Pizza hardhat: https://poly.pizza/m/cyjbHPC6QAM (CC Attribution, Poly by Google) */
@@ -349,9 +355,24 @@
         setVital(vSpo2El, '--', false);
       }
       if (typeof q.mq135 === 'number' && q.mq135 >= 0) {
-        setVital(vGasEl, `${q.mq135}`, true);
+        setVital(vMq135El, `${q.mq135}`, true);
       } else {
-        setVital(vGasEl, '--', false);
+        setVital(vMq135El, '--', false);
+      }
+      if (typeof q.mq136 === 'number' && q.mq136 >= 0) {
+        setVital(vMq136El, `${q.mq136}`, true);
+      } else {
+        setVital(vMq136El, '--', false);
+      }
+      if (typeof q.mq4 === 'number' && q.mq4 >= 0) {
+        setVital(vMq4El, `${q.mq4}`, true);
+      } else {
+        setVital(vMq4El, '--', false);
+      }
+      if (typeof q.mq7 === 'number' && q.mq7 >= 0) {
+        setVital(vMq7El, `${q.mq7}`, true);
+      } else {
+        setVital(vMq7El, '--', false);
       }
     }
 
@@ -431,10 +452,15 @@
           const now = performance.now();
           const walking = !!q.walking;
           const imuStill = q.still === true;
+          const calibrated = q.calibrated === true;
           const steps = q.steps || 0;
           const gz = typeof q.gz === 'number' ? q.gz : 0;
 
-          applyOrientation(q, imuStill && !walking);
+          if (!calibrated) {
+            setStatus('Hold helmet still to calibrate…', true);
+          }
+
+          applyOrientation(q, imuStill && !walking && calibrated);
           setActivity(walking, steps);
           updateVitals(q);
           const quatSnap = quatChanged(q);
@@ -458,10 +484,14 @@
             lastWalking = walking;
             lastWalkingTime = now;
           }
-          if (walking) {
+          if (!calibrated) {
+            /* status set above */
+          } else if (walking) {
             setStatus('Live IMU data', true);
           } else if (lastQuatChange > 0) {
             setStatus('Streaming OK — device still', true);
+          } else if (ws.readyState === WebSocket.OPEN) {
+            setStatus('Connected — calibrated', true);
           }
         } catch (_) {}
       };

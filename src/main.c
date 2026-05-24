@@ -134,11 +134,13 @@ void app_main(void)
     app_status_init();
     sensor_status_init();
 
-#if MQ135_ENABLE
+#if MQ_GAS_ENABLE
     if (mq135_init() == ESP_OK) {
         mq135_start_task();
     } else {
-        ESP_LOGW(TAG, "MQ135 init failed — check AO on GPIO%d", MQ135_ADC_GPIO);
+        ESP_LOGW(TAG, "MQ gas sensors init failed — check AO pins "
+                 "MQ135=%d MQ136=%d MQ4=%d MQ7=%d",
+                 MQ135_ADC_GPIO, MQ136_ADC_GPIO, MQ4_ADC_GPIO, MQ7_ADC_GPIO);
     }
 #endif
 

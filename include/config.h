@@ -20,19 +20,41 @@
 #ifndef ICM20948_I2C_HZ
 #define ICM20948_I2C_HZ 100000
 #endif
+/* IMU fusion loop period (5 ms ≈ 200 Hz). */
+#ifndef ICM20948_FUSION_INTERVAL_MS
+#define ICM20948_FUSION_INTERVAL_MS 5
+#endif
 #ifndef ICM20948_LOG_INTERVAL_MS
-#define ICM20948_LOG_INTERVAL_MS 25
+#define ICM20948_LOG_INTERVAL_MS ICM20948_FUSION_INTERVAL_MS
 #endif
 #ifndef ICM20948_SERIAL_LOG_MS
 #define ICM20948_SERIAL_LOG_MS 500
 #endif
 #ifndef MADGWICK_BETA
-#define MADGWICK_BETA 0.05f
+#define MADGWICK_BETA 0.08f
+#endif
+#ifndef MADGWICK_BETA_MIN
+#define MADGWICK_BETA_MIN 0.0f
+#endif
+/* Accel magnitude within this band of 1 g → trust gravity for tilt correction. */
+#ifndef ACCEL_TRUST_BAND_G
+#define ACCEL_TRUST_BAND_G 0.12f
+#endif
+/* Reduce accel trust when gyro rate exceeds this (deg/s). */
+#ifndef ACCEL_GYRO_GATE_DPS
+#define ACCEL_GYRO_GATE_DPS 25.0f
 #endif
 #ifndef GYRO_BIAS_SAMPLES
-#define GYRO_BIAS_SAMPLES 80
+#define GYRO_BIAS_SAMPLES 120
 #endif
-/* Hysteresis: freeze fusion below ON, resume above OFF (reduces noise jitter). */
+/* Slow gyro bias tracking while stationary (IIR coefficient per fusion step). */
+#ifndef GYRO_BIAS_ONLINE_ALPHA
+#define GYRO_BIAS_ONLINE_ALPHA 0.0015f
+#endif
+#ifndef ACCEL_STILL_BAND_G
+#define ACCEL_STILL_BAND_G 0.06f
+#endif
+/* Hysteresis for UI still flag (gyro magnitude). */
 #ifndef GYRO_STILL_ON_DPS
 #define GYRO_STILL_ON_DPS 2.5f
 #endif
@@ -125,18 +147,39 @@
 #define HEALTH_TEMP_RETRY_MS 30000
 #endif
 
-/* ========== MQ135 air-quality sensor (analog AO) ========== */
-#ifndef MQ135_ENABLE
-#define MQ135_ENABLE 1
+/* ========== MQ gas sensors (analog AO on ADC1) ========== */
+#ifndef MQ_GAS_ENABLE
+#define MQ_GAS_ENABLE 1
 #endif
-/* ESP32 ADC1: GPIO32–39 (input-only). GPIO34 is free on this board.
- * If your AO is on another pin, set MQ135_ADC_GPIO in build_flags. */
+/* Back-compat alias */
+#ifndef MQ135_ENABLE
+#define MQ135_ENABLE MQ_GAS_ENABLE
+#endif
+/* ESP32 ADC1: GPIO32–39. One AO pin per sensor. */
 #ifndef MQ135_ADC_GPIO
 #define MQ135_ADC_GPIO 34
 #endif
+#ifndef MQ136_ADC_GPIO
+#define MQ136_ADC_GPIO 35
+#endif
+#ifndef MQ4_ADC_GPIO
+#define MQ4_ADC_GPIO 32
+#endif
+#ifndef MQ7_ADC_GPIO
+#define MQ7_ADC_GPIO 33
+#endif
+#ifndef MQ_GAS_SENSOR_COUNT
+#define MQ_GAS_SENSOR_COUNT 4
+#endif
+#ifndef MQ_GAS_POLL_MS
+#define MQ_GAS_POLL_MS 500
+#endif
 #ifndef MQ135_POLL_MS
-#define MQ135_POLL_MS 500
+#define MQ135_POLL_MS MQ_GAS_POLL_MS
+#endif
+#ifndef MQ_GAS_ADC_SAMPLES
+#define MQ_GAS_ADC_SAMPLES 8
 #endif
 #ifndef MQ135_ADC_SAMPLES
-#define MQ135_ADC_SAMPLES 8
+#define MQ135_ADC_SAMPLES MQ_GAS_ADC_SAMPLES
 #endif

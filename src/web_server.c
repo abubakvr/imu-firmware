@@ -13,6 +13,7 @@
 #include "imu_fusion.h"
 #include "sensor_status.h"
 #include "step_detect.h"
+#include "config.h"
 #include "index_html.h"
 
 static const char *TAG = "web";
@@ -96,11 +97,12 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
     int spo2 = sensor_status_spo2_pct();
 
     bool still = icm20948_is_still();
+    bool calibrated = icm20948_is_calibrated();
     int n = snprintf(a->msg, sizeof(a->msg),
                      "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"gz\":%.2f,"
-                     "\"walking\":%s,\"still\":%s,\"steps\":%lu",
+                     "\"walking\":%s,\"still\":%s,\"calibrated\":%s,\"steps\":%lu",
                      w, x, y, z, gz_dps, walking ? "true" : "false", still ? "true" : "false",
-                     (unsigned long)steps);
+                     calibrated ? "true" : "false", (unsigned long)steps);
     if (temp_ok) {
         n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"temp\":%.1f", temp_c);
     }
@@ -110,10 +112,24 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
     if (spo2 > 0) {
         n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"spo2\":%d", spo2);
     }
-    if (sensor_status_mq135_valid()) {
+#if MQ_GAS_ENABLE
+    if (sensor_status_mq_gas_valid(0)) {
         n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq135\":%d",
-                      sensor_status_mq135_raw());
+                      sensor_status_mq_gas_raw(0));
     }
+    if (sensor_status_mq_gas_valid(1)) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq136\":%d",
+                      sensor_status_mq_gas_raw(1));
+    }
+    if (sensor_status_mq_gas_valid(2)) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq4\":%d",
+                      sensor_status_mq_gas_raw(2));
+    }
+    if (sensor_status_mq_gas_valid(3)) {
+        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq7\":%d",
+                      sensor_status_mq_gas_raw(3));
+    }
+#endif
     if (n > 0 && (size_t)n < sizeof(a->msg)) {
         snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, "}");
     }
@@ -135,15 +151,6 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_send(req, index_html, index_html_len);
 }
 
-/* Called by ESP-IDF after the WebSocket handshake (uri->handler is NOT). */
-static esp_err_t ws_post_handshake_cb(httpd_req_t *req)
-{
-    int fd = httpd_req_to_sockfd(req);
-    ws_fd_set(fd);
-    ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
-    return queue_quat_send(req->handle, fd);
-}
-
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     int fd = httpd_req_to_sockfd(req);
@@ -161,7 +168,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    /* ESP-IDF 5.1: handler runs after handshake; len==0 on first poll. */
     if (frame.len == 0) {
+        ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
+        queue_quat_send(req->handle, fd);
         return ESP_OK;
     }
 
@@ -173,8 +183,9 @@ static esp_err_t ws_handler(httpd_req_t *req)
     ret = httpd_ws_recv_frame(req, &frame, frame.len);
     if (ret == ESP_OK && frame.type == HTTPD_WS_TYPE_TEXT) {
         if (strncmp((char *)buf, "reset", frame.len) == 0) {
+            icm20948_request_calibration();
             imu_fusion_reset_reference();
-            ESP_LOGI(TAG, "orientation reference reset");
+            ESP_LOGI(TAG, "calibration requested + orientation reference reset");
         }
     }
     free(buf);
@@ -212,7 +223,6 @@ esp_err_t web_server_start(void)
         .method = HTTP_GET,
         .handler = ws_handler,
         .is_websocket = true,
-        .ws_post_handshake_cb = ws_post_handshake_cb,
     };
 
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_server, &root_uri), TAG, "root uri failed");
