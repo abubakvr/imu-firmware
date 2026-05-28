@@ -154,12 +154,17 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     int fd = httpd_req_to_sockfd(req);
-    ws_fd_set(fd);
+
+    /* ESP-IDF: first /ws call is still HTTP_GET (handshake). Do not recv yet. */
+    if (req->method == HTTP_GET) {
+        ws_fd_set(fd);
+        ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
+        return queue_quat_send(req->handle, fd);
+    }
 
     httpd_ws_frame_t frame = {0};
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) {
-        ws_fd_clear_if(fd);
         return ret;
     }
 
@@ -168,10 +173,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* ESP-IDF 5.1: handler runs after handshake; len==0 on first poll. */
     if (frame.len == 0) {
-        ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
-        queue_quat_send(req->handle, fd);
         return ESP_OK;
     }
 
@@ -182,11 +184,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
     frame.payload = buf;
     ret = httpd_ws_recv_frame(req, &frame, frame.len);
     if (ret == ESP_OK && frame.type == HTTPD_WS_TYPE_TEXT) {
+        ws_fd_set(fd);
         if (strncmp((char *)buf, "reset", frame.len) == 0) {
             icm20948_request_calibration();
             imu_fusion_reset_reference();
             ESP_LOGI(TAG, "calibration requested + orientation reference reset");
         }
+        queue_quat_send(req->handle, fd);
     }
     free(buf);
     return ret;

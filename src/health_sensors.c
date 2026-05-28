@@ -266,10 +266,16 @@ static void log_max30205_sample(i2c_master_bus_handle_t bus, uint8_t addr, const
 
 static void max30205_addr_scan_log(i2c_master_bus_handle_t bus)
 {
+    static const uint8_t quick_addrs[] = {
+        (uint8_t)TEMP_SENSOR_I2C_ADDR,
+        0x48U,
+        0x4DU,
+    };
     int n = 0;
+
     ESP_LOGI(TAG, "CJMCU-30205 address ACKs:");
-    for (size_t ai = 0; ai < sizeof(s_max30205_addrs) / sizeof(s_max30205_addrs[0]); ai++) {
-        uint8_t addr = s_max30205_addrs[ai];
+    for (size_t i = 0; i < sizeof(quick_addrs) / sizeof(quick_addrs[0]); i++) {
+        uint8_t addr = quick_addrs[i];
         if (temp_skip_addr(addr)) {
             continue;
         }
@@ -658,6 +664,16 @@ esp_err_t health_sensors_start_task(void)
     return ok == pdPASS ? ESP_OK : ESP_FAIL;
 }
 
+bool health_sensors_temp_ok(void)
+{
+    return s_temp_ok;
+}
+
+bool health_sensors_max30102_ok(void)
+{
+    return s_max_ok;
+}
+
 #else
 
 void health_sensors_i2c_diagnose(i2c_master_bus_handle_t bus)
@@ -675,6 +691,16 @@ esp_err_t health_sensors_init(i2c_master_bus_handle_t bus)
 esp_err_t health_sensors_start_task(void)
 {
     return ESP_OK;
+}
+
+bool health_sensors_temp_ok(void)
+{
+    return false;
+}
+
+bool health_sensors_max30102_ok(void)
+{
+    return false;
 }
 
 #endif
