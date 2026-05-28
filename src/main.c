@@ -67,6 +67,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         app_status_set_ip(ip);
         app_status_set_wifi_connected(true);
         s_retry_num = 0;
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        ESP_LOGI(TAG, "WiFi power save off (stable WebSocket / IMU stream)");
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -74,6 +76,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 static bool wifi_init_sta(void)
 {
     s_wifi_event_group = xEventGroupCreate();
+    if (s_wifi_event_group == NULL) {
+        ESP_LOGE(TAG, "WiFi event group alloc failed");
+        return false;
+    }
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -92,7 +98,7 @@ static bool wifi_init_sta(void)
     wifi_config_t wifi_config = {0};
     strncpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid) - 1);
     strncpy((char *)wifi_config.sta.password, WIFI_PASS, sizeof(wifi_config.sta.password) - 1);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
@@ -120,6 +126,48 @@ static void log_open_url(void)
     if (esp_netif_get_ip_info(netif, &ip) == ESP_OK) {
         ESP_LOGI(TAG, "Open in browser: http://" IPSTR "/", IP2STR(&ip.ip));
     }
+}
+
+static void sensors_start(void)
+{
+    imu_fusion_init();
+
+    bool imu_ok = (icm20948_init() == ESP_OK);
+    app_status_set_imu_ok(imu_ok);
+    if (!imu_ok) {
+        ESP_LOGE(TAG, "ICM20948 init failed — web UI loads but helmet will not move");
+        ESP_LOGE(TAG, "use SDA=GPIO%d SCL=GPIO%d, NCS→3.3V, AD0→GND for 0x68",
+                 ICM20948_SDA_GPIO, ICM20948_SCL_GPIO);
+        return;
+    }
+
+    /* Probe HR/temp before the 200 Hz IMU task contends on I2C. */
+#if HEALTH_SENSORS_ENABLE
+    {
+        i2c_master_bus_handle_t bus = icm20948_get_i2c_bus();
+        if (bus != NULL) {
+            if (health_sensors_init(bus) == ESP_OK) {
+                health_sensors_start_task();
+            } else {
+                ESP_LOGW(TAG, "health sensors init failed (MAX30102 0x57, CJMCU-30205)");
+            }
+        } else {
+            ESP_LOGW(TAG, "no I2C bus — health sensors skipped");
+        }
+    }
+#endif
+
+    ESP_ERROR_CHECK(icm20948_start_task());
+
+    ESP_LOGI(TAG, "--- sensors ---");
+    ESP_LOGI(TAG, "ICM20948: OK");
+#if HEALTH_SENSORS_ENABLE
+    ESP_LOGI(TAG, "MAX30205: %s", health_sensors_temp_ok() ? "OK" : "no");
+    ESP_LOGI(TAG, "MAX30102: %s", health_sensors_max30102_ok() ? "OK" : "no");
+#endif
+#if MQ_GAS_ENABLE
+    ESP_LOGI(TAG, "MQ gas: see mq135 tag above");
+#endif
 }
 
 void app_main(void)
@@ -153,32 +201,9 @@ void app_main(void)
     }
 #endif
 
-    imu_fusion_init();
-
-    bool imu_ok = (icm20948_init() == ESP_OK);
-    app_status_set_imu_ok(imu_ok);
-    if (imu_ok) {
-        ESP_ERROR_CHECK(icm20948_start_task());
-#if HEALTH_SENSORS_ENABLE
-        i2c_master_bus_handle_t bus = icm20948_get_i2c_bus();
-        if (health_sensors_init(bus) == ESP_OK) {
-            health_sensors_start_task();
-        } else {
-            ESP_LOGW(TAG, "health sensors not found (MAX30102 0x57, CJMCU-30205)");
-        }
-#endif
-    } else {
-        ESP_LOGE(TAG, "ICM20948 init failed — web UI will load but box will not move");
-        ESP_LOGE(TAG, "use SDA=GPIO%d SCL=GPIO%d, NCS→3.3V, AD0→GND for 0x68",
-                 ICM20948_SDA_GPIO, ICM20948_SCL_GPIO);
-    }
-
-#if OLED_ENABLE
-    oled_display_show_boot("WiFi", "Connecting...");
-#endif
-
+    ESP_LOGI(TAG, "starting WiFi (IMU viewer needs network first)");
     if (!wifi_init_sta()) {
-        ESP_LOGE(TAG, "WiFi failed — IMU viewer needs network");
+        ESP_LOGE(TAG, "WiFi failed — cannot open http://<esp-ip>/ in browser");
         app_status_set_wifi_connected(false);
         return;
     }
@@ -203,5 +228,7 @@ void app_main(void)
         return;
     }
 
+    ESP_LOGI(TAG, "HTTP server up — starting IMU / health sensors");
+    sensors_start();
     ESP_LOGI(TAG, "IMU viewer running");
 }

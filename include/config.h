@@ -87,7 +87,7 @@
 
 /* ========== 0.96" SPI OLED (SSD1306, 128x64) ========== */
 #ifndef OLED_ENABLE
-#define OLED_ENABLE 1
+#define OLED_ENABLE 0
 #endif
 /* VSPI on ESP32: SCK=18 MOSI=23 (use SPI3_HOST in driver code). */
 #ifndef OLED_SPI_HOST_ID

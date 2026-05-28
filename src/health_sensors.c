@@ -1,7 +1,6 @@
 #include "health_sensors.h"
 
 #include "config.h"
-#include "i2c_bus_lock.h"
 #include "sensor_status.h"
 
 #include <math.h>
@@ -47,13 +46,13 @@ typedef enum {
     TEMP_FMT_LM75,
 } temp_fmt_t;
 
+/* Slower clock for MAX30205 / CJMCU-30205 on a shared bus with IMU + MAX30102. */
+#define TEMP_I2C_HZ 50000
 #define TEMP_CONV_DELAY_MS 100
 
 #define FIFO_BUF_SAMPLES   100
 #define VITALS_WINDOW_MS   4000
 #define HEALTH_POLL_MS     20
-#define HEALTH_POLL_IDLE_MS 80
-#define MAX30102_IDLE_SKIP  6
 /* 100 SPS with 4-sample FIFO average (see FIFO_CFG 0x4F) */
 #define MAX30102_SAMPLE_HZ 25.0f
 #define FINGER_IR_MIN      50000.0f
@@ -70,33 +69,23 @@ static uint32_t s_ir_buf[FIFO_BUF_SAMPLES];
 static uint32_t s_red_buf[FIFO_BUF_SAMPLES];
 static int s_buf_len;
 static int64_t s_buf_start_us;
-static uint32_t s_health_loop;
-static uint32_t s_max30102_idle_loops;
 
 static esp_err_t max_write_u8(uint8_t reg, uint8_t val)
 {
     uint8_t buf[2] = {reg, val};
-    i2c_bus_lock();
-    esp_err_t err = i2c_master_transmit(s_max_dev, buf, sizeof(buf), I2C_TIMEOUT_MS);
-    i2c_bus_unlock();
-    return err;
+    return i2c_master_transmit(s_max_dev, buf, sizeof(buf), I2C_TIMEOUT_MS);
 }
 
 static esp_err_t max_read_u8(uint8_t reg, uint8_t *out)
 {
-    i2c_bus_lock();
-    esp_err_t err = i2c_master_transmit_receive(s_max_dev, &reg, 1, out, 1, I2C_TIMEOUT_MS);
-    i2c_bus_unlock();
-    return err;
+    return i2c_master_transmit_receive(s_max_dev, &reg, 1, out, 1, I2C_TIMEOUT_MS);
 }
 
 static esp_err_t max_read_fifo(uint32_t *red, uint32_t *ir)
 {
     uint8_t reg = MAX30102_REG_FIFO_DATA;
     uint8_t raw[6];
-    i2c_bus_lock();
     esp_err_t err = i2c_master_transmit_receive(s_max_dev, &reg, 1, raw, sizeof(raw), I2C_TIMEOUT_MS);
-    i2c_bus_unlock();
     if (err != ESP_OK) {
         return err;
     }
@@ -158,7 +147,6 @@ static esp_err_t max30102_init_chip(void)
 
 static esp_err_t temp_read_reg16(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t raw[2])
 {
-    i2c_bus_lock();
     esp_err_t err = i2c_master_transmit(dev, &reg, 1, I2C_TIMEOUT_MS);
     if (err == ESP_OK) {
         err = i2c_master_receive(dev, raw, 2, I2C_TIMEOUT_MS);
@@ -166,7 +154,6 @@ static esp_err_t temp_read_reg16(i2c_master_dev_handle_t dev, uint8_t reg, uint8
     if (err != ESP_OK) {
         err = i2c_master_transmit_receive(dev, &reg, 1, raw, 2, I2C_TIMEOUT_MS);
     }
-    i2c_bus_unlock();
     return err;
 }
 
@@ -236,9 +223,7 @@ static esp_err_t max30205_read_c_dev(i2c_master_dev_handle_t dev, temp_fmt_t fmt
 static esp_err_t max30205_init_dev(i2c_master_dev_handle_t dev)
 {
     uint8_t buf[2] = {MAX30205_REG_CONFIG, 0x00U};
-    i2c_bus_lock();
     esp_err_t err = i2c_master_transmit(dev, buf, sizeof(buf), I2C_TIMEOUT_MS);
-    i2c_bus_unlock();
     if (err != ESP_OK) {
         return err;
     }
@@ -259,12 +244,10 @@ static void log_max30205_sample(i2c_master_bus_handle_t bus, uint8_t addr, const
     i2c_device_config_t cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address  = addr,
-        .scl_speed_hz    = ICM20948_I2C_HZ,
+        .scl_speed_hz    = TEMP_I2C_HZ,
     };
     i2c_master_dev_handle_t dev = NULL;
-    i2c_bus_lock();
     if (i2c_master_bus_add_device(bus, &cfg, &dev) != ESP_OK) {
-        i2c_bus_unlock();
         return;
     }
 
@@ -279,33 +262,29 @@ static void log_max30205_sample(i2c_master_bus_handle_t bus, uint8_t addr, const
     ESP_LOGI(TAG, "%s 0x%02X: err=%s raw=%02X %02X max30205=%.2f lm75=%.2f",
              ctx, addr, esp_err_to_name(err), raw[0], raw[1], tc_max, tc_lm);
     i2c_master_bus_rm_device(dev);
-    i2c_bus_unlock();
 }
-
-#define TEMP_SCAN_FOUND_MAX 8
-static uint8_t s_temp_scan_found[TEMP_SCAN_FOUND_MAX];
-static int s_temp_scan_found_n;
 
 static void max30205_addr_scan_log(i2c_master_bus_handle_t bus)
 {
-    s_temp_scan_found_n = 0;
+    static const uint8_t quick_addrs[] = {
+        (uint8_t)TEMP_SENSOR_I2C_ADDR,
+        0x48U,
+        0x4DU,
+    };
+    int n = 0;
+
     ESP_LOGI(TAG, "CJMCU-30205 address ACKs:");
-    for (size_t ai = 0; ai < sizeof(s_max30205_addrs) / sizeof(s_max30205_addrs[0]); ai++) {
-        uint8_t addr = s_max30205_addrs[ai];
+    for (size_t i = 0; i < sizeof(quick_addrs) / sizeof(quick_addrs[0]); i++) {
+        uint8_t addr = quick_addrs[i];
         if (temp_skip_addr(addr)) {
             continue;
         }
-        i2c_bus_lock();
-        bool ack = i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) == ESP_OK;
-        i2c_bus_unlock();
-        if (ack) {
+        if (i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) == ESP_OK) {
             ESP_LOGI(TAG, "  0x%02X", addr);
-            if (s_temp_scan_found_n < TEMP_SCAN_FOUND_MAX) {
-                s_temp_scan_found[s_temp_scan_found_n++] = addr;
-            }
+            n++;
         }
     }
-    if (s_temp_scan_found_n == 0) {
+    if (n == 0) {
         ESP_LOGW(TAG, "  none (CJMCU not responding — check VIN/GND on module)");
     }
 }
@@ -323,10 +302,7 @@ static void i2c_quick_check_log(i2c_master_bus_handle_t bus)
              ICM20948_SDA_GPIO, ICM20948_SCL_GPIO);
     for (size_t i = 0; i < sizeof(addrs) / sizeof(addrs[0]); i++) {
         uint8_t addr = addrs[i];
-        i2c_bus_lock();
-        bool ack = i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) == ESP_OK;
-        i2c_bus_unlock();
-        if (ack) {
+        if (i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) == ESP_OK) {
             ESP_LOGI(TAG, "  ACK 0x%02X", addr);
         } else {
             ESP_LOGI(TAG, "  --- 0x%02X", addr);
@@ -348,25 +324,16 @@ static bool temp_probe_device(i2c_master_dev_handle_t dev, temp_fmt_t *fmt_out, 
 {
     uint8_t raw[2];
 
-    /* CJMCU boards often NACK config writes but still return valid temp data. */
+    if (max30205_init_dev(dev) != ESP_OK) {
+        return false;
+    }
     if (temp_read_reg16(dev, MAX30205_REG_TEMP, raw) != ESP_OK) {
         return false;
     }
     if (temp_decode_raw(raw, fmt_out, c_out) != ESP_OK) {
         return false;
     }
-    (void)max30205_init_dev(dev);
     return true;
-}
-
-static bool temp_addr_seen_in_scan(uint8_t addr)
-{
-    for (int i = 0; i < s_temp_scan_found_n; i++) {
-        if (s_temp_scan_found[i] == addr) {
-            return true;
-        }
-    }
-    return false;
 }
 
 static bool temp_try_addr(i2c_master_bus_handle_t bus, uint8_t addr, float *tc_out)
@@ -374,11 +341,7 @@ static bool temp_try_addr(i2c_master_bus_handle_t bus, uint8_t addr, float *tc_o
     if (temp_skip_addr(addr)) {
         return false;
     }
-    /* Probe can NACK briefly after ICM init; trust the pre-scan if we already ACK'd. */
-    i2c_bus_lock();
-    bool probed = i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) == ESP_OK;
-    i2c_bus_unlock();
-    if (!probed && !temp_addr_seen_in_scan(addr)) {
+    if (i2c_master_probe(bus, addr, I2C_TIMEOUT_MS) != ESP_OK) {
         if (addr == (uint8_t)TEMP_SENSOR_I2C_ADDR) {
             ESP_LOGW(TAG, "no I2C ACK at 0x%02X (CJMCU default address)", addr);
         }
@@ -388,12 +351,10 @@ static bool temp_try_addr(i2c_master_bus_handle_t bus, uint8_t addr, float *tc_o
     i2c_device_config_t tmp_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address  = addr,
-        .scl_speed_hz    = ICM20948_I2C_HZ,
+        .scl_speed_hz    = TEMP_I2C_HZ,
     };
     i2c_master_dev_handle_t probe = NULL;
-    i2c_bus_lock();
     if (i2c_master_bus_add_device(bus, &tmp_cfg, &probe) != ESP_OK) {
-        i2c_bus_unlock();
         return false;
     }
 
@@ -417,7 +378,6 @@ static bool temp_try_addr(i2c_master_bus_handle_t bus, uint8_t addr, float *tc_o
         }
         i2c_master_bus_rm_device(probe);
     }
-    i2c_bus_unlock();
     return ok;
 }
 
@@ -428,14 +388,6 @@ static bool temp_search_on_bus(i2c_master_bus_handle_t bus)
     }
 
     float tc = NAN;
-
-    for (int i = 0; i < s_temp_scan_found_n; i++) {
-        if (temp_try_addr(bus, s_temp_scan_found[i], &tc)) {
-            sensor_status_set_temp(tc, true);
-            return true;
-        }
-    }
-
     if (temp_try_addr(bus, (uint8_t)TEMP_SENSOR_I2C_ADDR, &tc)) {
         sensor_status_set_temp(tc, true);
         return true;
@@ -596,6 +548,7 @@ static void compute_vitals(int *hr_bpm, int *spo2_pct, bool *valid)
 static void health_task(void *arg)
 {
     (void)arg;
+    const TickType_t period = pdMS_TO_TICKS(HEALTH_POLL_MS);
     int64_t last_temp_us = 0;
 
     s_buf_len = 0;
@@ -607,9 +560,8 @@ static void health_task(void *arg)
 
     for (;;) {
         int64_t now = esp_timer_get_time();
-        s_health_loop++;
 
-        if (!s_temp_ok && !s_max_ok && s_imu_bus &&
+        if (!s_temp_ok && s_imu_bus &&
             (now - last_temp_retry_us) >= (int64_t)HEALTH_TEMP_RETRY_MS * 1000) {
             if (temp_search_on_bus(s_imu_bus)) {
                 ESP_LOGI(TAG, "CJMCU-30205 found on retry");
@@ -626,28 +578,21 @@ static void health_task(void *arg)
         }
 
         if (s_max_ok) {
-            int pending = 0;
-            bool poll_fifo = (s_max30102_idle_loops == 0) ||
-                             ((s_health_loop % MAX30102_IDLE_SKIP) == 0U);
-            if (poll_fifo) {
-                pending = max30102_fifo_count();
+            int pending = max30102_fifo_count();
+            if (pending <= 0) {
+                pending = 1;
+            }
+            if (pending > 8) {
+                pending = 8;
             }
 
-            if (pending > 0) {
-                s_max30102_idle_loops = 0;
-                if (pending > 8) {
-                    pending = 8;
+            for (int i = 0; i < pending; i++) {
+                uint32_t red = 0;
+                uint32_t ir = 0;
+                if (max_read_fifo(&red, &ir) != ESP_OK) {
+                    break;
                 }
-                for (int i = 0; i < pending; i++) {
-                    uint32_t red = 0;
-                    uint32_t ir = 0;
-                    if (max_read_fifo(&red, &ir) != ESP_OK) {
-                        break;
-                    }
-                    append_fifo_sample(red, ir);
-                }
-            } else if (poll_fifo) {
-                s_max30102_idle_loops++;
+                append_fifo_sample(red, ir);
             }
 
             if ((now - s_buf_start_us) >= (int64_t)VITALS_WINDOW_MS * 1000) {
@@ -661,11 +606,7 @@ static void health_task(void *arg)
             }
         }
 
-        TickType_t delay_ticks = pdMS_TO_TICKS(HEALTH_POLL_MS);
-        if (s_max_ok && s_max30102_idle_loops > 0) {
-            delay_ticks = pdMS_TO_TICKS(HEALTH_POLL_IDLE_MS);
-        }
-        vTaskDelay(delay_ticks);
+        vTaskDelay(period);
     }
 }
 
@@ -682,7 +623,6 @@ esp_err_t health_sensors_init(i2c_master_bus_handle_t bus)
         return ESP_ERR_INVALID_ARG;
     }
 
-    i2c_bus_lock();
     /* Temperature first (before MAX30102 FIFO traffic). */
     max30205_addr_scan_log(bus);
     if (!temp_search_on_bus(bus)) {
@@ -705,14 +645,9 @@ esp_err_t health_sensors_init(i2c_master_bus_handle_t bus)
             i2c_master_bus_rm_device(s_max_dev);
             s_max_dev = NULL;
         }
-    }
-    i2c_bus_unlock();
-    if (err != ESP_OK) {
+    } else {
         ESP_LOGW(TAG, "MAX30102 add device: %s", esp_err_to_name(err));
     }
-
-    ESP_LOGI(TAG, "health summary: temp=%s MAX30102=%s",
-             s_temp_ok ? "OK" : "no", s_max_ok ? "OK" : "no");
 
     if (!s_max_ok && !s_temp_ok) {
         return ESP_ERR_NOT_FOUND;
@@ -741,16 +676,6 @@ bool health_sensors_max30102_ok(void)
 
 #else
 
-bool health_sensors_temp_ok(void)
-{
-    return false;
-}
-
-bool health_sensors_max30102_ok(void)
-{
-    return false;
-}
-
 void health_sensors_i2c_diagnose(i2c_master_bus_handle_t bus)
 {
     (void)bus;
@@ -766,6 +691,16 @@ esp_err_t health_sensors_init(i2c_master_bus_handle_t bus)
 esp_err_t health_sensors_start_task(void)
 {
     return ESP_OK;
+}
+
+bool health_sensors_temp_ok(void)
+{
+    return false;
+}
+
+bool health_sensors_max30102_ok(void)
+{
+    return false;
 }
 
 #endif
