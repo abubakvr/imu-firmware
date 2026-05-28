@@ -1,6 +1,7 @@
 #include "icm20948.h"
 
 #include "config.h"
+#include "i2c_bus_lock.h"
 #include "imu_fusion.h"
 #include "step_detect.h"
 
@@ -103,6 +104,13 @@ static bool bias_stationary(float gyro_mag_dps, float axg, float ayg, float azg)
 {
     float amag = vec3_mag(axg, ayg, azg);
     return (gyro_mag_dps < GYRO_STILL_ON_DPS) &&
+           (fabsf(amag - 1.0f) < ACCEL_STILL_BAND_G);
+}
+
+static bool bias_stationary_for_cal(float gyro_mag_dps, float axg, float ayg, float azg)
+{
+    float amag = vec3_mag(axg, ayg, azg);
+    return (gyro_mag_dps < GYRO_CAL_STILL_DPS) &&
            (fabsf(amag - 1.0f) < ACCEL_STILL_BAND_G);
 }
 
@@ -220,7 +228,9 @@ void icm20948_request_calibration(void)
 /* ------------------------------------------------------------------ */
 static esp_err_t set_user_bank(uint8_t bank)
 {
-    if (!s_dev) return ESP_ERR_INVALID_STATE;
+    if (!s_dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
     uint8_t b = (uint8_t)((bank & 0x03U) << 4);
     uint8_t buf[2] = {REG_BANK_SEL, b};
     return i2c_master_transmit(s_dev, buf, sizeof(buf), I2C_XFER_TIMEOUT_MS);
@@ -228,14 +238,18 @@ static esp_err_t set_user_bank(uint8_t bank)
 
 static esp_err_t write_reg_u8(uint8_t reg, uint8_t val)
 {
-    if (!s_dev) return ESP_ERR_INVALID_STATE;
+    if (!s_dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
     uint8_t buf[2] = {reg, val};
     return i2c_master_transmit(s_dev, buf, sizeof(buf), I2C_XFER_TIMEOUT_MS);
 }
 
 static esp_err_t read_regs(uint8_t reg, uint8_t *out, size_t len)
 {
-    if (!s_dev) return ESP_ERR_INVALID_STATE;
+    if (!s_dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
     return i2c_master_transmit_receive(s_dev, &reg, 1, out, len, I2C_XFER_TIMEOUT_MS);
 }
 
@@ -279,27 +293,41 @@ void icm20948_deinit(void)
 }
 
 /* ------------------------------------------------------------------ */
-static esp_err_t ensure_i2c(void)
+static esp_err_t ensure_i2c_bus(void)
 {
-    if (s_i2c_installed) return ESP_OK;
+    if (s_bus) {
+        return ESP_OK;
+    }
 
     setup_i2c_gpio();
 
     i2c_master_bus_config_t bus_cfg = {
-        .i2c_port        = (i2c_port_num_t)ICM20948_I2C_PORT,
-        .sda_io_num      = (gpio_num_t)s_sda_gpio,
-        .scl_io_num      = (gpio_num_t)s_scl_gpio,
-        .clk_source      = I2C_CLK_SRC_DEFAULT,
+        .i2c_port          = (i2c_port_num_t)ICM20948_I2C_PORT,
+        .sda_io_num        = (gpio_num_t)s_sda_gpio,
+        .scl_io_num        = (gpio_num_t)s_scl_gpio,
+        .clk_source        = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .intr_priority   = 0,
+        .intr_priority     = 0,
         .trans_queue_depth = 0,
-        .flags           = {.enable_internal_pullup = 1},
+        .flags             = {.enable_internal_pullup = 1},
     };
 
     esp_err_t err = i2c_new_master_bus(&bus_cfg, &s_bus);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
         return err;
+    }
+    (void)i2c_bus_lock_init();
+    return ESP_OK;
+}
+
+static esp_err_t ensure_icm_device(void)
+{
+    if (s_dev) {
+        return ESP_OK;
+    }
+    if (!s_bus && ensure_i2c_bus() != ESP_OK) {
+        return ESP_FAIL;
     }
 
     i2c_device_config_t dev_cfg = {
@@ -309,11 +337,9 @@ static esp_err_t ensure_i2c(void)
         .scl_wait_us     = 300,
     };
 
-    err = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
+    esp_err_t err = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2c_master_bus_add_device failed: %s", esp_err_to_name(err));
-        i2c_del_master_bus(s_bus);
-        s_bus = NULL;
         return err;
     }
 
@@ -323,19 +349,189 @@ static esp_err_t ensure_i2c(void)
     return ESP_OK;
 }
 
+static bool i2c_addr_ack(uint8_t addr)
+{
+    if (!s_bus) {
+        return false;
+    }
+    i2c_bus_lock();
+    bool ack = i2c_master_probe(s_bus, addr, I2C_XFER_TIMEOUT_MS) == ESP_OK;
+    i2c_bus_unlock();
+    return ack;
+}
+
+static bool icm_skip_known_health_addr(uint8_t addr)
+{
+    if (addr == (uint8_t)MAX30102_I2C_ADDR) {
+        return true;
+    }
+    if (addr == (uint8_t)TEMP_SENSOR_I2C_ADDR) {
+        return true;
+    }
+    return false;
+}
+
+static esp_err_t icm_read_reg_at(uint8_t addr, uint8_t reg, uint8_t *val)
+{
+    i2c_device_config_t cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = addr,
+        .scl_speed_hz    = s_i2c_hz,
+    };
+    i2c_master_dev_handle_t tmp = NULL;
+    i2c_bus_lock();
+    esp_err_t err = i2c_master_bus_add_device(s_bus, &cfg, &tmp);
+    if (err != ESP_OK || !tmp) {
+        i2c_bus_unlock();
+        return err;
+    }
+    if (reg == REG_WHO_AM_I) {
+        uint8_t bank_sel[2] = {REG_BANK_SEL, 0x00U};
+        (void)i2c_master_transmit(tmp, bank_sel, sizeof(bank_sel), I2C_XFER_TIMEOUT_MS);
+    }
+    err = i2c_master_transmit_receive(tmp, &reg, 1, val, 1, I2C_XFER_TIMEOUT_MS);
+    i2c_master_bus_rm_device(tmp);
+    i2c_bus_unlock();
+    return err;
+}
+
+static esp_err_t who_am_i_at_addr(uint8_t addr, uint8_t *who_out)
+{
+    return icm_read_reg_at(addr, REG_WHO_AM_I, who_out);
+}
+
+static esp_err_t icm_check_who_at(uint8_t addr, uint8_t *addr_out)
+{
+    uint8_t who0 = 0;
+    if (icm_read_reg_at(addr, REG_WHO_AM_I, &who0) != ESP_OK) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    ESP_LOGI(TAG, "  0x%02X: WHO_AM_I reg0=0x%02X", addr, who0);
+    if (who0 == WHO_AM_I_ICM20948) {
+        *addr_out = addr;
+        ESP_LOGI(TAG, "ICM20948 found at 0x%02X", addr);
+        return ESP_OK;
+    }
+    if (who0 == 0x68U || who0 == 0x71U) {
+        ESP_LOGW(TAG, "  0x%02X looks like MPU (0x%02X), not ICM20948 (0xEA)", addr, who0);
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+/* Probe first (no register reads on empty addresses), then WHO only where ACK. */
+static esp_err_t icm_discover_address(uint8_t *addr_out)
+{
+    static const uint8_t icm_addrs[] = {(uint8_t)ICM20948_I2C_ADDR, 0x69U};
+    static const uint8_t extra_slots[] = {0x6AU, 0x6BU, 0x6CU, 0x6DU, 0x6EU, 0x6FU};
+
+    ESP_LOGI(TAG, "ICM20948 scan (WHO=0x%02X) on SDA=%d SCL=%d",
+             WHO_AM_I_ICM20948, s_sda_gpio, s_scl_gpio);
+
+    for (size_t i = 0; i < sizeof(icm_addrs) / sizeof(icm_addrs[0]); i++) {
+        if (icm_check_who_at(icm_addrs[i], addr_out) == ESP_OK) {
+            return ESP_OK;
+        }
+    }
+
+    uint8_t ack_list[16];
+    int ack_n = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        if (!i2c_addr_ack(addr)) {
+            continue;
+        }
+        if (ack_n < (int)(sizeof(ack_list) / sizeof(ack_list[0]))) {
+            ack_list[ack_n++] = addr;
+        }
+    }
+
+    if (ack_n > 0) {
+        ESP_LOGI(TAG, "I2C probe ACK at:");
+        for (int i = 0; i < ack_n; i++) {
+            ESP_LOGI(TAG, "  0x%02X", ack_list[i]);
+        }
+    } else {
+        ESP_LOGW(TAG, "I2C probe: no devices ACK");
+    }
+
+    for (int i = 0; i < ack_n; i++) {
+        uint8_t addr = ack_list[i];
+        if (icm_skip_known_health_addr(addr)) {
+            continue;
+        }
+        if (icm_check_who_at(addr, addr_out) == ESP_OK) {
+            return ESP_OK;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(extra_slots) / sizeof(extra_slots[0]); i++) {
+        uint8_t addr = extra_slots[i];
+        if (icm_skip_known_health_addr(addr)) {
+            continue;
+        }
+        bool already = false;
+        for (int j = 0; j < ack_n; j++) {
+            if (ack_list[j] == addr) {
+                already = true;
+                break;
+            }
+        }
+        if (!already && icm_check_who_at(addr, addr_out) == ESP_OK) {
+            return ESP_OK;
+        }
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+static void log_expected_i2c_devices(void)
+{
+    static const struct {
+        uint8_t addr;
+        const char *name;
+    } expect[] = {
+        {(uint8_t)ICM20948_I2C_ADDR, "ICM-20948 (AD0→GND)"},
+        {0x69U, "ICM-20948 (AD0→3.3V)"},
+        {0x57U, "MAX30102"},
+        {0x4FU, "MAX30205"},
+    };
+
+    ESP_LOGI(TAG, "expected on SDA=GPIO%d SCL=GPIO%d:", s_sda_gpio, s_scl_gpio);
+    for (size_t i = 0; i < sizeof(expect) / sizeof(expect[0]); i++) {
+        bool ok = i2c_addr_ack(expect[i].addr);
+        ESP_LOGI(TAG, "  0x%02X %s: %s", expect[i].addr, expect[i].name, ok ? "ACK" : "---");
+    }
+}
+
+static void log_icm_hw_checklist(void)
+{
+    ESP_LOGE(TAG, "no ICM20948 (WHO 0xEA) on any address 0x01-0x7E — firmware scanned full bus");
+    ESP_LOGE(TAG, "  MAX30102/MAX30205 ACK => SDA/SCL reach ESP; ICM chip still silent");
+    ESP_LOGE(TAG, "  1) DMM continuity: GPIO22->ICM SDA, GPIO21->ICM SCL (same branch as HR/temp)");
+    ESP_LOGE(TAG, "  2) CS/NCS pin on ICM chip = 3.3V (0V = SPI only)");
+    ESP_LOGE(TAG, "  3) AD0/SDO strap (GND=0x68, 3.3V=0x69) — both were tried");
+    ESP_LOGE(TAG, "  4) Wrong part (MPU6050/9250 uses reg 0x75 WHO, not 0x00=0xEA)");
+    ESP_LOGE(TAG, "  5) Dead ICM or not soldered on shared harness");
+}
+
 /* ------------------------------------------------------------------ */
 void icm20948_i2c_scan_log(void)
 {
-    /* Use the current bus if already up; don't call ensure_i2c() here
-       because it may re-create the bus with stale config after a failed
-       init sequence. */
-    if (!s_bus) return;
+    if (!s_bus) {
+        return;
+    }
 
-    ESP_LOGI(TAG, "probing I2C bus (SDA=%d SCL=%d)...", s_sda_gpio, s_scl_gpio);
+    ESP_LOGI(TAG, "full I2C scan (SDA=%d SCL=%d)...", s_sda_gpio, s_scl_gpio);
+    log_expected_i2c_devices();
+
     int found = 0;
     for (uint8_t addr = 1; addr < 127; addr++) {
-        if (i2c_master_probe(s_bus, addr, I2C_XFER_TIMEOUT_MS) == ESP_OK) {
-            ESP_LOGI(TAG, "  device at 0x%02X", addr);
+        if (i2c_addr_ack(addr)) {
+            uint8_t who = 0;
+            if (who_am_i_at_addr(addr, &who) == ESP_OK) {
+                ESP_LOGI(TAG, "  0x%02X ACK, reg0/WHO=0x%02X", addr, who);
+            } else {
+                ESP_LOGI(TAG, "  0x%02X ACK", addr);
+            }
             found++;
         }
     }
@@ -401,16 +597,61 @@ static esp_err_t icm20948_init_chip(void)
 /* Try init with whatever s_i2c_addr / s_sda_gpio / s_scl_gpio / s_i2c_hz
    are currently set to. Tears down on failure so the caller can adjust
    and retry. */
+static void icm_remove_device(void)
+{
+    if (s_dev) {
+        i2c_master_bus_rm_device(s_dev);
+        s_dev = NULL;
+    }
+    s_i2c_installed = false;
+}
+
+static esp_err_t try_init_at_address(uint8_t addr)
+{
+    s_i2c_addr = addr;
+    icm_remove_device();
+
+    esp_err_t err = ensure_icm_device();
+    if (err != ESP_OK) {
+        return err;
+    }
+    return icm20948_init_chip();
+}
+
 static esp_err_t try_init(void)
 {
-    esp_err_t err = ensure_i2c();
-    if (err != ESP_OK) return err;
-
-    err = icm20948_init_chip();
+    esp_err_t err = ensure_i2c_bus();
     if (err != ESP_OK) {
-        teardown_i2c(); /* clean slate for next attempt */
+        return err;
     }
-    return err;
+
+    uint8_t found = 0;
+    if (icm_discover_address(&found) == ESP_OK) {
+        err = try_init_at_address(found);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "ICM at 0x%02X answered WHO but init failed", found);
+        icm_remove_device();
+    }
+
+    static const uint8_t legacy[] = {(uint8_t)ICM20948_I2C_ADDR, 0x69U};
+    for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
+        if (!i2c_addr_ack(legacy[i])) {
+            continue;
+        }
+        ESP_LOGI(TAG, "legacy probe ACK at 0x%02X", legacy[i]);
+        err = try_init_at_address(legacy[i]);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        icm_remove_device();
+    }
+
+    ESP_LOGW(TAG, "no ICM20948 (WHO 0xEA) on configured SDA=GPIO%d SCL=GPIO%d",
+             ICM20948_SDA_GPIO, ICM20948_SCL_GPIO);
+    teardown_i2c();
+    return ESP_ERR_NOT_FOUND;
 }
 
 /* ------------------------------------------------------------------ */
@@ -420,56 +661,22 @@ esp_err_t icm20948_init(void)
     s_i2c_addr = (uint8_t)ICM20948_I2C_ADDR; /* 0x68 */
     s_sda_gpio = ICM20948_SDA_GPIO;
     s_scl_gpio = ICM20948_SCL_GPIO;
-    s_i2c_hz   = ICM20948_I2C_HZ;            /* 400k */
+    s_i2c_hz   = ICM20948_I2C_HZ;
 
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* --- attempt 1: 0x68 @ 400k --- */
     esp_err_t err = try_init();
-    if (err == ESP_OK) goto done;
+    if (err == ESP_OK) {
+        goto done;
+    }
 
-    /* --- attempt 2: 0x69 @ 400k --- */
-    ESP_LOGW(TAG, "retry at 0x69 ...");
-    s_i2c_addr = 0x69;
+    ESP_LOGW(TAG, "retry at 100 kHz ...");
+    s_i2c_hz = 100000;
     err = try_init();
-    if (err == ESP_OK) goto done;
+    if (err == ESP_OK) {
+        goto done;
+    }
 
-    /* --- attempt 3: 0x68 @ 100k --- */
-    ESP_LOGW(TAG, "retry at 0x68, 100 kHz ...");
-    s_i2c_addr = 0x68;
-    s_i2c_hz   = 100000;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    /* --- attempt 4: 0x69 @ 100k --- */
-    ESP_LOGW(TAG, "retry at 0x69, 100 kHz ...");
-    s_i2c_addr = 0x69;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    /* --- attempts 5-8: swap SDA/SCL, repeat both addresses / speeds --- */
-    ESP_LOGW(TAG, "retry with SDA/SCL swapped ...");
-    s_sda_gpio = ICM20948_SCL_GPIO;
-    s_scl_gpio = ICM20948_SDA_GPIO;
-
-    s_i2c_addr = 0x68; s_i2c_hz = ICM20948_I2C_HZ;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    s_i2c_addr = 0x69;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    s_i2c_addr = 0x68; s_i2c_hz = 100000;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    s_i2c_addr = 0x69;
-    err = try_init();
-    if (err == ESP_OK) goto done;
-
-    /* All attempts failed — run a bus scan on the last successful bus
-       setup so we can at least see what's on the wire. */
     ESP_LOGE(TAG, "all init attempts failed");
 
     /* Re-establish the bus just long enough to scan */
@@ -477,9 +684,15 @@ esp_err_t icm20948_init(void)
     s_scl_gpio = ICM20948_SCL_GPIO;
     s_i2c_addr = ICM20948_I2C_ADDR;
     s_i2c_hz   = 100000;
-    if (ensure_i2c() == ESP_OK) {
+    if (ensure_i2c_bus() == ESP_OK) {
         icm20948_i2c_scan_log();
-        teardown_i2c();
+        log_icm_hw_checklist();
+        if (s_dev) {
+            i2c_master_bus_rm_device(s_dev);
+            s_dev = NULL;
+        }
+        s_i2c_installed = false;
+        ESP_LOGW(TAG, "I2C bus left active for health sensors (IMU not responding)");
     }
     return err;
 
@@ -506,12 +719,20 @@ esp_err_t icm20948_read_motion(int16_t *ax, int16_t *ay, int16_t *az,
         return ESP_ERR_INVALID_STATE;
     }
 
+    i2c_bus_lock();
     esp_err_t err = set_user_bank(0);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        i2c_bus_unlock();
+        return err;
+    }
 
     uint8_t raw[12];
     err = read_regs(REG_ACCEL_XOUT_H, raw, sizeof(raw));
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        i2c_bus_unlock();
+        return err;
+    }
+    i2c_bus_unlock();
 
     *ax = be16(&raw[0]);
     *ay = be16(&raw[2]);
@@ -532,6 +753,7 @@ static void icm20948_motion_task(void *arg)
     int64_t last_us = esp_timer_get_time();
     uint32_t sample = 0;
     uint32_t read_fail = 0;
+    uint32_t cal_bad_streak = 0;
 
     if (!s_gyro_calibrated) {
         cal_reset_accumulators();
@@ -540,7 +762,9 @@ static void icm20948_motion_task(void *arg)
     ESP_LOGI(TAG, "IMU fusion ~%.0f Hz, serial log every %d ms",
              1000.0f / (float)ICM20948_FUSION_INTERVAL_MS, ICM20948_SERIAL_LOG_MS);
     if (!s_gyro_calibrated) {
-        ESP_LOGI(TAG, "keep helmet still for calibration (%d samples)...", GYRO_BIAS_SAMPLES);
+        ESP_LOGI(TAG, "hold helmet still ~%.1f s for cal (gyro < %.1f dps, |a|~1g)",
+                 (float)(GYRO_BIAS_SAMPLES * ICM20948_FUSION_INTERVAL_MS) / 1000.0f,
+                 GYRO_CAL_STILL_DPS);
     }
 
     for (;;) {
@@ -561,7 +785,9 @@ static void icm20948_motion_task(void *arg)
             float gzr = (float)gz / GYRO_LSB_PER_DPS;
 
             if (!s_gyro_calibrated) {
-                if (bias_stationary(vec3_mag(gxr, gyr, gzr), axg, ayg, azg)) {
+                float gyro_raw_dps = vec3_mag(gxr, gyr, gzr);
+                if (bias_stationary_for_cal(gyro_raw_dps, axg, ayg, azg)) {
+                    cal_bad_streak = 0;
                     s_gyro_cal_sum[0] += gxr;
                     s_gyro_cal_sum[1] += gyr;
                     s_gyro_cal_sum[2] += gzr;
@@ -569,6 +795,12 @@ static void icm20948_motion_task(void *arg)
                     s_accel_cal_sum[1] += ayg;
                     s_accel_cal_sum[2] += azg;
                     s_gyro_cal_count++;
+                    if (s_gyro_cal_count == 1 ||
+                        s_gyro_cal_count == (uint32_t)GYRO_BIAS_SAMPLES ||
+                        (s_gyro_cal_count % 30U) == 0U) {
+                        ESP_LOGI(TAG, "cal %lu/%d", (unsigned long)s_gyro_cal_count,
+                                 GYRO_BIAS_SAMPLES);
+                    }
                     if (s_gyro_cal_count >= (uint32_t)GYRO_BIAS_SAMPLES) {
                         cal_finish_from_accumulators();
                         portENTER_CRITICAL(&s_cal_mux);
@@ -576,7 +808,13 @@ static void icm20948_motion_task(void *arg)
                         portEXIT_CRITICAL(&s_cal_mux);
                     }
                 } else if (s_gyro_cal_count > 0) {
-                    cal_reset_accumulators();
+                    cal_bad_streak++;
+                    if (cal_bad_streak >= (uint32_t)GYRO_CAL_BAD_STREAK_RESET) {
+                        ESP_LOGW(TAG, "cal reset (motion gyro=%.1f dps) — hold still again",
+                                 gyro_raw_dps);
+                        cal_reset_accumulators();
+                        cal_bad_streak = 0;
+                    }
                 }
             } else {
                 float gxd = gxr - s_gyro_bias_dps[0];
@@ -617,12 +855,20 @@ static void icm20948_motion_task(void *arg)
             if (sample == 1 || (sample % log_every) == 0) {
                 float w, x, y, z;
                 imu_fusion_get_display_quat(&w, &x, &y, &z);
-                ESP_LOGI(TAG,
-                         "ax=%d ay=%d az=%d | accel(g)=%.3f,%.3f,%.3f | "
-                         "quat w=%.3f x=%.3f y=%.3f z=%.3f | cal=%d walk=%d",
-                         ax, ay, az, axg, ayg, azg, w, x, y, z,
-                         s_gyro_calibrated ? 1 : 0,
-                         step_detect_is_walking() ? 1 : 0);
+                if (!s_gyro_calibrated) {
+                    float amag = vec3_mag(axg, ayg, azg);
+                    ESP_LOGI(TAG,
+                             "ax=%d ay=%d az=%d | a|g|=%.3f gyro=%.2f,%.2f,%.2f dps | "
+                             "cal %lu/%d (hold still)",
+                             ax, ay, az, amag, gxr, gyr, gzr,
+                             (unsigned long)s_gyro_cal_count, GYRO_BIAS_SAMPLES);
+                } else {
+                    ESP_LOGI(TAG,
+                             "ax=%d ay=%d az=%d | accel(g)=%.3f,%.3f,%.3f | "
+                             "quat w=%.3f x=%.3f y=%.3f z=%.3f | cal=%d walk=%d",
+                             ax, ay, az, axg, ayg, azg, w, x, y, z,
+                             1, step_detect_is_walking() ? 1 : 0);
+                }
             }
         } else {
             read_fail++;
@@ -654,7 +900,7 @@ bool icm20948_is_calibrated(void)
 
 i2c_master_bus_handle_t icm20948_get_i2c_bus(void)
 {
-    return s_i2c_installed ? s_bus : NULL;
+    return s_bus;
 }
 
 esp_err_t icm20948_start_task(void)

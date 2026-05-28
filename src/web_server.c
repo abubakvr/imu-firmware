@@ -22,10 +22,13 @@ static int s_ws_fd = -1;
 static bool s_ws_send_pending;
 static portMUX_TYPE s_ws_mux = portMUX_INITIALIZER_UNLOCKED;
 
+#define WS_MSG_MAX 320
+#define WS_BROADCAST_MS 20
+
 typedef struct {
     httpd_handle_t hd;
     int fd;
-    char msg[256];
+    char msg[WS_MSG_MAX];
 } ws_send_arg_t;
 
 static int ws_fd_get(void)
@@ -52,39 +55,21 @@ static void ws_fd_clear_if(int fd)
     portEXIT_CRITICAL(&s_ws_mux);
 }
 
-static void ws_send_work(void *arg)
-{
-    ws_send_arg_t *a = (ws_send_arg_t *)arg;
-    httpd_ws_frame_t frame = {
-        .final = true,
-        .fragmented = false,
-        .type = HTTPD_WS_TYPE_TEXT,
-        .payload = (uint8_t *)a->msg,
-        .len = strlen(a->msg),
-    };
-    esp_err_t err = httpd_ws_send_frame_async(a->hd, a->fd, &frame);
-    if (err != ESP_OK) {
-        ws_fd_clear_if(a->fd);
-        ESP_LOGW(TAG, "WebSocket send failed (fd=%d) — client gone?", a->fd);
-    }
-    s_ws_send_pending = false;
-    free(a);
-}
-
-static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
+static bool ws_client_alive(httpd_handle_t hd, int fd)
 {
     if (!hd || fd < 0) {
-        return ESP_ERR_INVALID_ARG;
+        return false;
     }
-    if (s_ws_send_pending) {
-        return ESP_OK;
-    }
+    return httpd_ws_get_fd_info(hd, fd) == HTTPD_WS_CLIENT_WEBSOCKET;
+}
 
-    ws_send_arg_t *a = calloc(1, sizeof(*a));
-    if (!a) {
-        return ESP_ERR_NO_MEM;
-    }
+static void httpd_close_fn(httpd_handle_t hd, int sockfd)
+{
+    ws_fd_clear_if(sockfd);
+}
 
+static int build_ws_json(char *buf, size_t buf_len)
+{
     float w, x, y, z;
     bool walking = step_detect_is_walking();
     uint32_t steps = step_detect_get_step_count();
@@ -98,41 +83,93 @@ static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
 
     bool still = icm20948_is_still();
     bool calibrated = icm20948_is_calibrated();
-    int n = snprintf(a->msg, sizeof(a->msg),
+    int n = snprintf(buf, buf_len,
                      "{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"gz\":%.2f,"
                      "\"walking\":%s,\"still\":%s,\"calibrated\":%s,\"steps\":%lu",
                      w, x, y, z, gz_dps, walking ? "true" : "false", still ? "true" : "false",
                      calibrated ? "true" : "false", (unsigned long)steps);
-    if (temp_ok) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"temp\":%.1f", temp_c);
+    if (n < 0) {
+        n = 0;
     }
-    if (hr > 0) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"hr\":%d", hr);
+    if (temp_ok && (size_t)n < buf_len - 16U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"temp\":%.1f", temp_c);
     }
-    if (spo2 > 0) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"spo2\":%d", spo2);
+    if (hr > 0 && (size_t)n < buf_len - 12U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"hr\":%d", hr);
+    }
+    if (spo2 > 0 && (size_t)n < buf_len - 12U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"spo2\":%d", spo2);
     }
 #if MQ_GAS_ENABLE
-    if (sensor_status_mq_gas_valid(0)) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq135\":%d",
+    if (sensor_status_mq_gas_valid(0) && (size_t)n < buf_len - 14U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"mq135\":%d",
                       sensor_status_mq_gas_raw(0));
     }
-    if (sensor_status_mq_gas_valid(1)) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq136\":%d",
+    if (sensor_status_mq_gas_valid(1) && (size_t)n < buf_len - 14U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"mq136\":%d",
                       sensor_status_mq_gas_raw(1));
     }
-    if (sensor_status_mq_gas_valid(2)) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq4\":%d",
+    if (sensor_status_mq_gas_valid(2) && (size_t)n < buf_len - 12U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"mq4\":%d",
                       sensor_status_mq_gas_raw(2));
     }
-    if (sensor_status_mq_gas_valid(3)) {
-        n += snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, ",\"mq7\":%d",
+    if (sensor_status_mq_gas_valid(3) && (size_t)n < buf_len - 12U) {
+        n += snprintf(buf + n, buf_len - (size_t)n, ",\"mq7\":%d",
                       sensor_status_mq_gas_raw(3));
     }
 #endif
-    if (n > 0 && (size_t)n < sizeof(a->msg)) {
-        snprintf(a->msg + n, sizeof(a->msg) - (size_t)n, "}");
+    if ((size_t)n >= buf_len - 1U) {
+        n = (int)buf_len - 2;
     }
+    buf[n] = '}';
+    buf[n + 1] = '\0';
+    return n + 1;
+}
+
+static void ws_send_work(void *arg)
+{
+    ws_send_arg_t *a = (ws_send_arg_t *)arg;
+    s_ws_send_pending = false;
+
+    if (!ws_client_alive(a->hd, a->fd)) {
+        ws_fd_clear_if(a->fd);
+        free(a);
+        return;
+    }
+
+    httpd_ws_frame_t frame = {
+        .final = true,
+        .fragmented = false,
+        .type = HTTPD_WS_TYPE_TEXT,
+        .payload = (uint8_t *)a->msg,
+        .len = strlen(a->msg),
+    };
+    esp_err_t err = httpd_ws_send_frame_async(a->hd, a->fd, &frame);
+    if (err != ESP_OK) {
+        ws_fd_clear_if(a->fd);
+        ESP_LOGD(TAG, "WebSocket send dropped (fd=%d): %s", a->fd, esp_err_to_name(err));
+    }
+    free(a);
+}
+
+static esp_err_t queue_quat_send(httpd_handle_t hd, int fd)
+{
+    if (!hd || fd < 0 || !ws_client_alive(hd, fd)) {
+        if (fd >= 0) {
+            ws_fd_clear_if(fd);
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_ws_send_pending) {
+        return ESP_OK;
+    }
+
+    ws_send_arg_t *a = calloc(1, sizeof(*a));
+    if (!a) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    build_ws_json(a->msg, sizeof(a->msg));
     a->hd = hd;
     a->fd = fd;
 
@@ -154,12 +191,17 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     int fd = httpd_req_to_sockfd(req);
-    ws_fd_set(fd);
+
+    /* ESP-IDF: first /ws invocation is still HTTP_GET (handshake). Do not recv yet. */
+    if (req->method == HTTP_GET) {
+        ws_fd_set(fd);
+        ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
+        return queue_quat_send(req->handle, fd);
+    }
 
     httpd_ws_frame_t frame = {0};
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) {
-        ws_fd_clear_if(fd);
         return ret;
     }
 
@@ -168,10 +210,18 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* ESP-IDF 5.1: handler runs after handshake; len==0 on first poll. */
+    if (frame.type == HTTPD_WS_TYPE_PING) {
+        httpd_ws_frame_t pong = {
+            .final = true,
+            .type = HTTPD_WS_TYPE_PONG,
+            .payload = frame.payload,
+            .len = frame.len,
+        };
+        (void)httpd_ws_send_frame(req, &pong);
+        return ESP_OK;
+    }
+
     if (frame.len == 0) {
-        ESP_LOGI(TAG, "WebSocket client connected (fd=%d)", fd);
-        queue_quat_send(req->handle, fd);
         return ESP_OK;
     }
 
@@ -182,11 +232,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
     frame.payload = buf;
     ret = httpd_ws_recv_frame(req, &frame, frame.len);
     if (ret == ESP_OK && frame.type == HTTPD_WS_TYPE_TEXT) {
+        ws_fd_set(fd);
         if (strncmp((char *)buf, "reset", frame.len) == 0) {
             icm20948_request_calibration();
             imu_fusion_reset_reference();
             ESP_LOGI(TAG, "calibration requested + orientation reference reset");
         }
+        queue_quat_send(req->handle, fd);
     }
     free(buf);
     return ret;
@@ -194,12 +246,16 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
 static void ws_broadcast_task(void *arg)
 {
-    const TickType_t period = pdMS_TO_TICKS(20);
+    const TickType_t period = pdMS_TO_TICKS(WS_BROADCAST_MS);
 
     while (1) {
         int fd = ws_fd_get();
         if (s_server && fd >= 0) {
-            queue_quat_send(s_server, fd);
+            if (ws_client_alive(s_server, fd)) {
+                queue_quat_send(s_server, fd);
+            } else {
+                ws_fd_clear_if(fd);
+            }
         }
         vTaskDelay(period);
     }
@@ -210,6 +266,8 @@ esp_err_t web_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_open_sockets = 7;
     config.stack_size = 8192;
+    config.close_fn = httpd_close_fn;
+    config.lru_purge_enable = true;
 
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "httpd start failed");
 
